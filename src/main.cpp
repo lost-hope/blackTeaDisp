@@ -8,16 +8,56 @@
  *      Author: H2zero
  */
 
- #include <Arduino.h>
- #include <NimBLEDevice.h>
- 
+#include <Arduino.h>
+#include <ArduinoJson.h>
+#include <WiFi.h>
+#include <NimBLEDevice.h>
+#include <ESPAsyncWebServer.h>
+#include "LittleFS.h"
+
+
+
+
+
+#define BT_MAX_DEVS 1
 #define BT_DALY_CMD_SOC  0x90
+#define BT_DALY_CMD_VRANGE 0x91
 #define BT_DALY_CMD_TRANGE 0x92
 
+// Create AsyncWebServer object on port 80
+AsyncWebServer server(80);
 
- static constexpr uint32_t scanTimeMs = 5 * 1000;
- boolean connected=false;
- NimBLERemoteService* rsvc;
+// Create a WebSocket object
+AsyncWebSocket ws("/ws");
+
+//
+JsonDocument alldata_doc;
+
+
+// Initialize LittleFS
+void initLittleFS() {
+    if (!LittleFS.begin(true)) {
+      Serial.println("An error has occurred while mounting LittleFS");
+    }
+    Serial.println("LittleFS mounted successfully");
+}
+
+
+NimBLERemoteService* rsvc;
+enum BtType{
+    BMS_DALY,
+    CTRL_FARDRIVER
+};
+
+struct BtDevice{
+    const String name;
+    const NimBLEAddress address;
+    const BtType type;
+    const bool enabled;
+    NimBLEClient* client;
+};
+
+#include "config.h"
 
 
  void notifyCb(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify){
@@ -25,164 +65,145 @@
 };
 
 void notifycb(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
-  std::string str  = (isNotify == true) ? "Notification" : "Indication";
-  str             += " from ";
-  str             += pRemoteCharacteristic->getClient()->getPeerAddress().toString();
-  str             += ": Service = " + pRemoteCharacteristic->getRemoteService()->getUUID().toString();
-  str             += ", Characteristic = " + pRemoteCharacteristic->getUUID().toString();
-  str             += ", Value = " + std::string((char*)pData, length);
-  Serial.printf("%s\n", str.c_str());
-  Serial.printf("RAW-Data: ");
-  int i;
-  for (i = 0; i < length; i++){
-    if (i > 0) printf(":");
-    printf("%02X", pData[i]);
-}
-printf("\n");
+  
+  
     if(pData[2]==BT_DALY_CMD_SOC){
         uint16_t soc_perm=(uint16_t)((pData[10] &0xFF)<<8 | pData[11]) ;
         int64_t current_ma=((uint32_t)((pData[8] &0xFF)<<8 | pData[9])-30000)*100;
         uint32_t volt_tot_mv=(uint16_t)((pData[4] &0xFF)<<8 | pData[5])       *100;
         Serial.printf("SoC: %.1f %%, V_tot: %.1f V, current: %.1f A\n",soc_perm/10.0,volt_tot_mv/1000.0,current_ma/1000.0);
+        alldata_doc["batteries"][0]["soc_perm"]=soc_perm;
     }else if(pData[2]==BT_DALY_CMD_TRANGE){
         uint8_t highest_temp=pData[4] -40 ;
         uint8_t highest_temp_cell=pData[5] ;
         uint8_t lowest_temp=pData[6] -40 ;
         uint8_t lowest_temp_cell=pData[7] ;
-        Serial.printf("highT(no. %u): %i °C, lowT(no. %u): %i °C", highest_temp_cell,highest_temp, lowest_temp_cell,lowest_temp);
+        Serial.printf("highT(no. %u): %i °C, lowT(no. %u): %i °C\n", highest_temp_cell,highest_temp, lowest_temp_cell,lowest_temp);
+    }else if(pData[2]==BT_DALY_CMD_VRANGE){
+        uint16_t highest_v_mv=(uint16_t)((pData[4] &0xFF)<<8 | pData[5])  ;
+        uint8_t highest_v_cell=pData[6] ;
+        uint16_t lowest_v_mv=(uint16_t)((pData[7] &0xFF)<<8 | pData[8])  ;
+        uint8_t lowest_v_cell=pData[9] ;
+        Serial.printf("highV(no. %u): %i °mV, lowV(no. %u): %i mV\n", highest_v_cell,highest_v_mv, lowest_v_cell,lowest_v_mv);
+    }else{
+        std::string str  = (isNotify == true) ? "Notification" : "Indication";
+        str             += " from ";
+        str             += pRemoteCharacteristic->getClient()->getPeerAddress().toString();
+        str             += ": Service = " + pRemoteCharacteristic->getRemoteService()->getUUID().toString();
+        str             += ", Characteristic = " + pRemoteCharacteristic->getUUID().toString();
+        str             += ", Value = " + std::string((char*)pData, length);
+        Serial.printf("%s\n", str.c_str());
+        Serial.printf("RAW-Data: ");
+        for (int i = 0; i < length; i++){
+            if (i > 0) printf(":");
+                printf("%02X", pData[i]);
+        }
+        printf("\n");
+
     }
 
 }
 
- class ClientCallbacks : public NimBLEClientCallbacks {
-     void onConnect(NimBLEClient* pC) override {
-         Serial.printf("Connected to: %s\n", pC->getPeerAddress().toString().c_str());
-         
-         connected=true;
-     }
- 
-     void onDisconnect(NimBLEClient* pClient, int reason) override {
-         Serial.printf("%s Disconnected, reason = %d - Starting scan\n", pClient->getPeerAddress().toString().c_str(), reason);
-         NimBLEDevice::getScan()->start(scanTimeMs);
-     }
- } clientCallbacks;
- 
- class ScanCallbacks : public NimBLEScanCallbacks {
-     void onResult(const NimBLEAdvertisedDevice* advertisedDevice) override {
-         Serial.printf("Advertised Device found: %s of type %u\n", advertisedDevice->toString().c_str(),advertisedDevice->getAddress().getType());
-         if (advertisedDevice->haveName() && advertisedDevice->getAddress().toString() == "54:d2:72:36:6a:fc") {
-             Serial.printf("Found Our Device of type\n ");
-
-             /** Async connections can be made directly in the scan callbacks */
-             auto pClient = NimBLEDevice::getDisconnectedClient();
-             if (!pClient) {
-                 pClient = NimBLEDevice::createClient(advertisedDevice->getAddress());
-                 if (!pClient) {
-                     Serial.printf("Failed to create client\n");
-                     return;
-                 }
-             }
- 
-             pClient->setClientCallbacks(&clientCallbacks, false);
-             if (!pClient->connect(true, true, false)) { // delete attributes, async connect, no MTU exchange
-                 NimBLEDevice::deleteClient(pClient);
-                 Serial.printf("Failed to connect\n");
-                 return;
-             }
-         }
-     }
- 
-     void onScanEnd(const NimBLEScanResults& results, int reason) override {
-         Serial.printf("Scan Ended\n");
-         NimBLEDevice::getScan()->start(scanTimeMs);
-     }
- } scanCallbacks;
- 
-
-
-
- void setup() {
-     Serial.begin(115200);
-     Serial.printf("Starting NimBLE Async Client\n");
-     NimBLEDevice::init("Async-Client");
-     NimBLEDevice::setPower(3); /** +3db */
- 
-     NimBLEScan* pScan = NimBLEDevice::getScan();
-   //  pScan->setScanCallbacks(&scanCallbacks);
-   //  pScan->setInterval(45);
-   //  pScan->setWindow(45);
-     pScan->setActiveScan(false);
-    // pScan->start(scanTimeMs);
- }
-
- auto pClient = NimBLEDevice::getDisconnectedClient();
-
-
-
-
- void loop() {
-     delay(100);
-    if(connected){
-        connected=false;
-
-        const NimBLEUUID svc_uuid("0000fff0-0000-1000-8000-00805f9b34fb");
-         Serial.printf("uuid: %s\n",svc_uuid.toString().c_str());
-         
-         Serial.printf("okili00\n");
-         pClient->getServices(true); 
-         pClient->discoverAttributes(); 
-         rsvc =pClient->getService(svc_uuid);;
-         Serial.printf("okili00\n");
-        // pC->getServices(true);
-         //if(pC){Serial.printf("notnulli\n");}
-          
-         Serial.printf("okili00\n");
-         if(rsvc!=NULL){
-            Serial.printf("Service found\n");
-         }else{
-            Serial.printf("Svc invalid\n");
-         }
-         rsvc->getCharacteristic(NimBLEUUID("0000fff1-0000-1000-8000-00805f9b34fb"))->subscribe(true,notifycb,true);
-         Serial.printf("okili0\n");
-         //soc,voltage,current
-         const char cmd1[13]={0xa5,0x80,0x90,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbd};
-         rsvc->getCharacteristic(NimBLEUUID("0000fff2-0000-1000-8000-00805f9b34fb"))->writeValue(cmd1,13);
-
-         const char cmd2[13]={0xa5,0x80,0x92,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbf};
-         rsvc->getCharacteristic(NimBLEUUID("0000fff2-0000-1000-8000-00805f9b34fb"))->writeValue(cmd2,13);
-
-         Serial.printf("okili1 \n");
-        //  if(ch && ch->canWrite()){
-        //     Serial.printf("okili\n");
-        // }else{
-        //     Serial.printf("NOT okili\n");
-        // }
-
-
-
-    }
+bool setup_daly_bms(BtDevice* d){
+   // BtDevice d=btdevices[index];
+    const NimBLEUUID svc_uuid("0000fff0-0000-1000-8000-00805f9b34fb");
+    //Serial.printf("uuid: %s\n",svc_uuid.toString().c_str());
+    
+    rsvc =d->client->getService(svc_uuid);;
+    
+    //if(pC){Serial.printf("notnulli\n");}
      
-     if (!pClient) {
-      
-      //pClient = NimBLEDevice::createClient(NimBLEAddress("64:E8:33:70:48:B2",BLE_ADDR_PUBLIC));
-        pClient = NimBLEDevice::createClient(NimBLEAddress("40:18:03:01:23:cc",BLE_ADDR_RANDOM)); //verif
-         if (!pClient) {
-             Serial.printf("Failed to create client\n");
-             return;
-         }
-     }
+    if(rsvc==NULL){
+       Serial.printf("Svc invalid\n");
+       return false;
+    }
+    rsvc->getCharacteristic(NimBLEUUID("0000fff1-0000-1000-8000-00805f9b34fb"))->subscribe(true,notifycb,true);
+    
+    //soc,voltage,current
+    const char cmd1[13]={0xa5,0x80,BT_DALY_CMD_SOC,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbd};
+    rsvc->getCharacteristic(NimBLEUUID("0000fff2-0000-1000-8000-00805f9b34fb"))->writeValue(cmd1,13);
+    delay(50);
+    //temp-range
+    const char cmd2[13]={0xa5,0x80,BT_DALY_CMD_TRANGE,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbf};
+    rsvc->getCharacteristic(NimBLEUUID("0000fff2-0000-1000-8000-00805f9b34fb"))->writeValue(cmd2,13);
+    delay(50);
+    //voltage range
+    const char cmd3[13]={0xa5,0x80,BT_DALY_CMD_VRANGE,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbe};
+    rsvc->getCharacteristic(NimBLEUUID("0000fff2-0000-1000-8000-00805f9b34fb"))->writeValue(cmd3,13);
+    delay(50);
 
-     if(!pClient->isConnected()){
-      pClient->setClientCallbacks(&clientCallbacks, false);
-      if (!pClient->connect(true, true, true)) { // delete attributes, async connect, no MTU exchange
-        // NimBLEDevice::deleteClient(pClient);
-         Serial.printf("Failed to connect\n");
-         return;
-      }else{
-        //
+    return true;
+
+}
+void initWiFi(){
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.softAP(ap_ssid, ap_password);
+    WiFi.begin(private_ssid, private_password);
+    IPAddress apIP = WiFi.softAPIP();
+    IPAddress privateIP= WiFi.localIP();
+
+    Serial.printf("AP IP: %s, Client IP: %s \n", apIP.toString().c_str(),privateIP.toString().c_str());
+}
+
+void setup_webserver_websocket(){
+    server.on("/json2", HTTP_GET, [](AsyncWebServerRequest *request) {
+        char json[1000];
+        serializeJson(alldata_doc, json);
+        request->send(200, "application/json", (const uint8_t *)json, strlen(json));
+        //request->send(response);
+    });
+    server.begin();
+}
+
+void setup() {
+    Serial.begin(115200);
+    initWiFi();
+    setup_webserver_websocket();
+  
+    Serial.printf("Starting NimBLE Client\n");
+    NimBLEDevice::init("BT-Client");
+    NimBLEDevice::setPower(3); /** +3db */
+
+    NimBLEScan* pScan = NimBLEDevice::getScan();
+  //  pScan->setScanCallbacks(&scanCallbacks);
+  //  pScan->setInterval(45);
+  //  pScan->setWindow(45);
+    pScan->setActiveScan(false);
+   // pScan->start(scanTimeMs);
+
+    for(int i=0;i<BT_MAX_DEVS;i++){
+        BtDevice* d=&btdevices[i];
+        // Serial.printf("client null1: %i\n",d->client==NULL);
 
 
-      }
+        if(!d->client){
+            Serial.printf("Try to create client for '%s' to %s\n",d->name.c_str(),d->address.toString().c_str());
+            d->client=NimBLEDevice::createClient(d->address);
+        }
+        //Serial.printf("client null2: %i\n",d->client==NULL);
+    }
+}
+
+void loop() {
+     delay(100);
+
+    for(int i=0;i<BT_MAX_DEVS;i++){
+        BtDevice* d=&btdevices[i];
+        //Serial.printf("client null1: %i\n",d->client==NULL);
+
+        if(!d->client->isConnected()){
+            if(!d->client->connect(true, false, false)){
+                Serial.printf("Failed to connect client\n");
+                continue;
+            }
+        }
+        //Serial.printf("connected.\n");
+
+        //here we have connection
+        if(d->type==BMS_DALY){
+            setup_daly_bms(d);
+        }
+
 
     }
     //Serial.printf("loop-di-love\n");
