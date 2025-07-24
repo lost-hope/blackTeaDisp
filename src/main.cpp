@@ -19,7 +19,7 @@
 
 
 
-#define BT_MAX_DEVS 1
+#define BT_MAX_DEVS 2
 #define BT_DALY_CMD_SOC  0x90
 #define BT_DALY_CMD_VRANGE 0x91
 #define BT_DALY_CMD_TRANGE 0x92
@@ -51,20 +51,18 @@ enum BtType{
 
 struct BtDevice{
     const String name;
-    const NimBLEAddress address;
+    uint32_t refresh_int_ms=200;
+    uint32_t last_refresh_ms=200;
+    NimBLEAddress address;
+    const String bt_id;
     const BtType type;
-    const bool enabled;
+    bool enabled=true;
     NimBLEClient* client;
 };
 
 #include "config.h"
 
-
- void notifyCb(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify){
-  Serial.printf("Hallo!");
-};
-
-void notifycb(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
+void notifycb_bms_daly(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
   
   
     if(pData[2]==BT_DALY_CMD_SOC){
@@ -117,7 +115,7 @@ bool setup_daly_bms(BtDevice* d){
        Serial.printf("Svc invalid\n");
        return false;
     }
-    rsvc->getCharacteristic(NimBLEUUID("0000fff1-0000-1000-8000-00805f9b34fb"))->subscribe(true,notifycb,true);
+    rsvc->getCharacteristic(NimBLEUUID("0000fff1-0000-1000-8000-00805f9b34fb"))->subscribe(true,notifycb_bms_daly,true);
     
     //soc,voltage,current
     const char cmd1[13]={0xa5,0x80,BT_DALY_CMD_SOC,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbd};
@@ -173,10 +171,9 @@ void setup() {
 
     for(int i=0;i<BT_MAX_DEVS;i++){
         BtDevice* d=&btdevices[i];
-        // Serial.printf("client null1: %i\n",d->client==NULL);
-
-
-        if(!d->client){
+        
+        //handle fardriver seperately as its mac is dynamic and unknown
+        if(!d->client && d->type!=CTRL_FARDRIVER){
             Serial.printf("Try to create client for '%s' to %s\n",d->name.c_str(),d->address.toString().c_str());
             d->client=NimBLEDevice::createClient(d->address);
         }
@@ -190,18 +187,47 @@ void loop() {
     for(int i=0;i<BT_MAX_DEVS;i++){
         BtDevice* d=&btdevices[i];
         //Serial.printf("client null1: %i\n",d->client==NULL);
-
+        
         if(!d->client->isConnected()){
-            if(!d->client->connect(true, false, false)){
-                Serial.printf("Failed to connect client\n");
-                continue;
+            if(d->type!=CTRL_FARDRIVER){
+                if(!d->client->connect(true, false, false)){
+                    Serial.printf("Failed to connect client\n");
+                    continue;
+                }
+            }else{
+            //handle fardriver separately
+                NimBLEScan *pScan = NimBLEDevice::getScan();
+                NimBLEScanResults results = pScan->getResults(5 * 1000);
+                for (int i = 0; i < results.getCount(); i++) {
+                    const NimBLEAdvertisedDevice *device = results.getDevice(i);
+                    
+                    if(strcmp(d->bt_id.c_str(),device->getName().c_str())!=0){
+                        continue;
+                    }
+                    d->address=device->getAddress();
+                    if(!d->client->connect(true, false, false)){
+                        Serial.printf("Failed to connect client\n");
+                        continue;
+                    }
+                    //TODO: Check model number via notify @ address a1/a2
+                    if(!modelnummer){
+                        d->client->disconnect();
+                        setcooldown ~5s
+                        continue;
+                    }
+                }
             }
+        }else{
+
+
         }
         //Serial.printf("connected.\n");
 
         //here we have connection
         if(d->type==BMS_DALY){
             setup_daly_bms(d);
+        }else if(d->type==CTRL_FARDRIVER){
+            //renew notify every 1.5-2.0s
         }
 
 
