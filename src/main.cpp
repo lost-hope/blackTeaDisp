@@ -85,6 +85,12 @@ struct FarDriverControllerDevice{
     unsigned long last_subscription=0;
 };
 
+uint8_t wheel_radius;
+uint8_t wheel_width;
+uint8_t wheel_ratio;
+uint16_t rate_ratio;
+uint16_t cur_speed_kph;
+
 #include "config.h"
 
 int8_t get_bms_index_by_client(NimBLEClient* c){
@@ -107,9 +113,9 @@ void debug_notify(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pD
     Serial.printf("RAW-Data: ");
     for (int i = 0; i < length; i++){
         if (i > 0) printf(":");
-            printf("%02X", pData[i]);
+            Serial.printf("%02X", pData[i]);
     }
-    printf("\n");
+    Serial.printf("\n");
 }
 
 void verify_model_no(NimBLERemoteCharacteristic* pRemoteCharacteristic,uint8_t* pData, uint8_t part){
@@ -129,26 +135,41 @@ void verify_model_no(NimBLERemoteCharacteristic* pRemoteCharacteristic,uint8_t* 
 void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
     Serial.printf("-> Notify from Controller\n");
     // credits to: https://github.com/jackhumbert/fardriver-controllers/blob/main/fardriver.hpp 
-    debug_notify(pRemoteCharacteristic, pData, length, isNotify);
+    //debug_notify(pRemoteCharacteristic, pData, length, isNotify);
 
-    //TODO: Check model number via notify @ address a1/a2
-    if(pData[1]==0xa1){
-        verify_model_no(pRemoteCharacteristic,pData,0);
-    }
-    if(pData[1]==0xa2){
-        verify_model_no(pRemoteCharacteristic,pData,1);
-    }
+    
+
 
     if(fardriver_controller_device.verified<3){
-        return;
-    }
-    //now we are sure that we have the right controller and can retrieve data
+        //Check model number via notify @ address a1/a2
+        if(pData[1]==0xa1){
+            verify_model_no(pRemoteCharacteristic,pData,0);
+        }else if(pData[1]==0xa2){
+            verify_model_no(pRemoteCharacteristic,pData,1);
+        }
+    }else{
+        //here we are sure that we have the right controller and can retrieve data
+        if(pData[1]==0xaf){         //matches d0 !!!!
+            wheel_ratio=  pData[6] ;
+            wheel_radius= pData[7] ;
+            alldata_doc["engine"]["avg_speed_kph"]= pData[8] ;
+            wheel_width= pData[9] ;
+            rate_ratio=(uint16_t)((pData[10] &0xFF)<<8 | pData[11]) ;
+            alldata_doc["engine"]["cur_speed_kph"]=cur_speed_kph * (0.00376991136f * (wheel_radius * 1270.f + wheel_width * wheel_ratio) / rate_ratio);
+        }else if(pData[1]==0xb0){   //matches 0xe2 !!!!
+            cur_speed_kph=(uint16_t)((pData[8] &0xFF)<<8 | pData[9]) ;
+        }else if(pData[1]==0xb5){   //matches 0xf4 ????
 
-                // if(!modelnummer){
-            //             d->client->disconnect();
-            //             setcooldown ~5s
-            //             continue;
-            // }
+        }else if(pData[1]==0x8b){   //matches 0x1e ????
+
+        }
+
+        Serial.printf("maybe speed? @ %02X vals: %02X %02X", pData[1],pData[8],pData[9]);
+    }
+
+    
+
+
 }
 
 void notifycb_bms_daly(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
