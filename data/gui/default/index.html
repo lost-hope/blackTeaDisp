@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>ESP IOT DASHBOARD</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="icon" type="image/png" href="favicon.png">
+        <link rel="stylesheet" type="text/css" href="style.css">
+    </head>
+    <body>
+        <div class="topnav">
+            <h1>SENSOR READINGS (WEBSOCKET)</h1>
+        </div>
+        <div class="content">
+            <div class="card-grid">
+                <div class="card">
+                    <p class="card-title"> Volt</p>
+                    <p class="reading"><span id="total_voltage"></span>  mV</p>
+                </div>
+                <div class="card">
+                    <p class="card-title"> Time</p>
+                    <p class="reading"><span id="time"></span>  seconds</p>
+                </div>
+                <div class="card">
+                    <p class="card-title"> Speed</p>
+                    <p class="reading"><span id="speed"></span> km/h</p>
+                </div>
+                <div class="card">
+                    <p class="card-title"> SoC</p>
+                    <p class="reading"><span id="soc_perm"></span>  Promille</p>
+                </div>
+            </div>
+        </div>
+        <script src="../script.js"></script>
+    </body>
+</html>

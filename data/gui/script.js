@@ -7,9 +7,9 @@ function onload(event) {
     initWebSocket();
 }
 
-function getReadings(){
-    websocket.send("getReadings");
-}
+//function getReadings(){
+//    websocket.send("getReadings");
+//}
 
 function initWebSocket() {
     console.log('Trying to open a WebSocket connection…');
@@ -22,7 +22,7 @@ function initWebSocket() {
 // When websocket is established, call the getReadings() function
 function onOpen(event) {
     console.log('Connection opened');
-    getReadings();
+    //getReadings();
 }
 
 function onClose(event) {
