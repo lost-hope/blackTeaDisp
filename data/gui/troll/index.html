@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+    <head>
+            <title>BTM Wildfire</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <link rel="icon" type="image/png" href="favicon.png">
+            <link rel="stylesheet" type="text/css" href="style.css">
+    </head>
+    <body>
+        <div class="flex-container" id="main_panel">
+            <div class="flex-container" id="header_panel">
+                <div id="clock">
+                    12:00pm
+                </div>
+            </div>
+
+            <div class="flex-container" id="central_row_panel">
+                <div class="side_column">
+                    <div class="data_tile">
+                        <div><span>Remaining: </span><span id="range"></span>km</div>
+                        <div><span>Trip: </span><span id="trip"></span>km</div>
+                        <div><span>ODO: </span><span id="odo"></span>km</div>
+                    </div>
+                    <div class="data_tile">
+                        <div><span>avg consumption: </span><span id="odo"></span>kWh/100km</div>
+                        <div><span>avg speed: </span><span id="odo"></span>kWh/100km</div>
+                    </div>
+                </div>
+                <div class="flex-container" id="speed_panel">
+                    <div>
+                        <svg>
+                            <circle id="speedcircle" cx="50%" cy="50%" r="0"  stroke-width="35" />
+                            <text x="50%" y="50%" text-anchor="middle" alignment-baseline="middle" id="speedometer">77</text>
+                            <text x="50%" y="80%" text-anchor="middle" alignment-baseline="middle" id="speedunit">km/h</text>
+                          </svg>
+                        <!--<span id="speedometer">79</span>
+                        <span>kmh</span> -->
+                    </div>    
+                    <div>
+                        <span id="mode">NORMAL</span>
+                    </div>               
+                </div>
+                <div class="side_column">
+                    <div class="data_tile">
+                        <div><span>Bat SoC: </span><span id="soc"></span>%</div>
+                        <div><span>Bat1: </span><span id="bat0_soc"></span>% / <span id="bat0_volt"></span>V</div>
+                        <div><span>Bat2: </span><span id="bat1_soc"></span>% / <span id="bat1_volt"></span>V</div>
+                    </div>
+                    <div class="data_tile">
+                        <div><span>Temp Motor: </span><span id="engine_temp"></span>°C</div>
+                        <div><span>Temp Controller: </span><span id="controller_temp"></span>°C</div>
+                        <div><span>Temp Bat1: </span><span id="bat0_temp"></span>°C</div>
+                        <div><span>Temp Bat2: </span><span id="bat1_temp"></span>°C</div>
+                    </div>
+                </div>
+            <div>
+        </div>
+        <script src="../script.js"></script>
+    </body>
+</html>
