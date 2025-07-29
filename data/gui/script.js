@@ -3,10 +3,29 @@ var websocket;
 // Init web socket when the page loads
 window.addEventListener('load', onload);
 
+async function getData() {
+    const url = `http://${window.location.hostname}/json2`;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Response status: ${response.status}`);
+      }
+  
+      const json = await response.json();
+      console.log(json);
+      parseData(json);
+      
+    } catch (error) {
+      console.error(error.message);
+    }
+  }
+
 function onload(event) {
+    speedmeter(270);
+    getData();
     initWebSocket();
     ftime();
-    speedmeter(270);
+    
 }
 
 //function getReadings(){
@@ -37,10 +56,7 @@ function onClose(event) {
 bat0_soc=0;
 bat1_soc=0;
 
-function onMessage(event) {
-    console.log(event.data);
-    var myObj = JSON.parse(event.data);
-    var keys = Object.keys(myObj);
+function parseData(myObj){
 
     let bat0=((myObj || {}).batteries || {})[0];
     if(bat0!=undefined){
@@ -52,11 +68,15 @@ function onMessage(event) {
         }
 
         if(bat0.current_ma != undefined){
-            document.getElementById("xxxx").innerHTML = bat0.current_ma/1000.0;
+         //   document.getElementById("xxxx").innerHTML = bat0.current_ma/1000.0;
         }
 
         if(bat0.volt_tot_mv != undefined){
             document.getElementById("bat0_volt").innerHTML = bat0.volt_tot_mv/1000.0;
+        }
+
+        if(bat0.highest_temp != undefined){
+            document.getElementById("bat0_temp").innerHTML = bat0.highest_temp;
         }
     }
 
@@ -80,11 +100,23 @@ function onMessage(event) {
             }
             document.getElementById("mode").innerHTML = lbl;
         }
+        if(ctrl.engine_temp != undefined){
+            document.getElementById("engine_temp").innerHTML = ctrl.engine_temp;
+        }
+        if(ctrl.controller_temp != undefined){
+            document.getElementById("controller_temp").innerHTML = ctrl.controller_temp;
+        }
     }
  /*   for (var i = 0; i < keys.length; i++){
         var key = keys[i];
         document.getElementById(key).innerHTML = myObj[key];
     }*/
+}
+
+
+function onMessage(event) {
+    console.log(event.data)
+    parseData(JSON.parse(event.data));
 }
 
 

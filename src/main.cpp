@@ -76,6 +76,9 @@ struct CtrlData{
     bool motion;
     bool sliding_backwards;
     uint8_t gear;
+
+    int16_t engine_temp;
+    int16_t controller_temp;
 };
 
 struct BmsData{
@@ -130,8 +133,19 @@ struct FarDriverControllerDevice{
 };
 
 
-
 #include "config.h"
+
+/**
+ * @return true if values was changed, false if not
+ */
+template <typename T> bool update_if_changed(T* store,T new_val,JsonVariant json){
+    if((*store) != new_val){
+        (*store)=new_val;
+        json.set(new_val);
+        return true;
+    }
+    return false;
+}
 
 void ws_send(JsonDocument& doc) {
     const size_t len = measureJson(doc);
@@ -246,18 +260,18 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
             doc["controller"]["motion"]=cd->motion=(bool)(pData[2] & 0x20);
 
         }else if(pData[1]==0xb5){   //matches 0xf4 !!!!
-            return;
+            doc["controller"]["engine_temp"]=cd->engine_temp=(int16_t)((pData[3] &0xFF)<<8 | pData[2])  ;
         }else if(pData[1]==0x8b){   //matches 0x1e ????
             return;
-        }else if(pData[1]==0xb3){   //matches 0xd6 ?! quite sure, but 0x93 could also be a candidate
-            return;
+        }else if(pData[1]==0x86){   //matches 0xd6 ?! not that sure, but 0x86,0x93 could also be a candidate
+            doc["controller"]["controller_temp"]=cd->controller_temp=(int16_t)((pData[11] &0xFF)<<8 | pData[12])  ;
         }else if(pData[1]==0x94){   //matches 0x69 !!!!
             return;
         }else{
             //return to prevent empty ws-messages
             return;
         }
-
+        doc["other"]["time"]=millis();
         ws_send(doc);
         
         //alldata_doc["controller"]=doc["controller"];
@@ -280,6 +294,7 @@ void notifycb_bms_daly(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_
     
     if(pData[2]==BT_DALY_CMD_SOC){
         doc["batteries"][bms_i]["soc_perm"]=bd->soc_perm=(uint16_t)((pData[10] &0xFF)<<8 | pData[11]) ;
+        //update_if_changed<uint16_t>(&bd->soc_perm,(uint16_t)((pData[10] &0xFF)<<8 | pData[11]),doc["batteries"][bms_i]["soc_perm"]);
         doc["batteries"][bms_i]["current_ma"]=bd->current_ma=((int64_t)((pData[8] &0xFF)<<8 | pData[9])-30000)*100;
         doc["batteries"][bms_i]["volt_tot_mv"]=bd->volt_tot_mv=(uint16_t)((pData[4] &0xFF)<<8 | pData[5])       *100;
         Serial.printf("SoC: %.1f %%, V_tot: %.1f V, current: %.1f A\n",bd->soc_perm/10.0,bd->volt_tot_mv/1000.0,bd->current_ma/1000.0);
