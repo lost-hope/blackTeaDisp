@@ -2,3 +2,196 @@
     font-size: 70px;
     color: #222222;
 }
+
+* {
+    box-sizing: border-box;
+    font-family: 'Noto Sans';
+    color: #fff;
+}
+
+html, body {
+}
+
+html{
+    height: 100vh;
+    
+}
+
+body{
+    display: flex;
+    margin: 0px;
+    height: 100%;
+    justify-content: center;
+    align-items: center;
+    background-color: #222;
+}
+
+div{
+    border: 0px red solid;
+}
+
+.icondata{
+    display: flex;
+    flex-direction: row;
+}
+
+.datatab{
+    font-size: 9.5cqw;
+}
+
+.datatab td{
+    vertical-align: middle;
+}
+
+.datatab tr td.ico img{
+    display: block;
+    margin-left: 0px;
+}
+
+.datatab tr td.ico {
+    text-align: left;
+    font-size: 10px;
+}
+
+.datatab tr td.val{
+    text-align: right;
+}
+
+
+#maincontainer{
+    /*
+    //too slow for tiny webserver :(
+    background-image: url('res/bg.webp');
+    background-repeat: repeat;
+    background-size: 20% 20%;*/
+
+    background-color: #252525;
+    opacity: 1;
+    background-color: #151515;
+opacity: 1;
+background-image:  repeating-radial-gradient( circle at 0 0, transparent 0, #202020 7px ), repeating-linear-gradient( #00000055, #000000 );
+
+    min-height: 300px;
+    min-width: 700px;
+    max-width: 800px;
+    width:70%;
+    display: flex;
+    padding: 10px;
+    flex-direction: column;
+    border: 0px red solid;
+}
+
+#contentpanel{
+    display: flex;
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-direction: row;
+   border:0px solid yellow;
+}
+
+#statusbar{
+    display: flex;
+    height: 40px;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 2px #222 solid;
+    color:#fff;
+    background-color: #000;
+}
+
+#clock{
+    /*flex-grow: 1;*/
+    font-size: 25px;
+    font-weight: bold;
+}
+
+#leftIndicator{
+    margin-right: 15px;
+    margin-left: 15px !important;
+    -webkit-transform: scaleX(-1);
+    transform: scaleX(-1);
+}
+
+#rightIndicator{
+    margin-left: 15px !important;
+    margin-right: 15px;
+}
+
+#leftIcons,#rightIcons{
+    display: flex;
+    width: 200px;
+    
+}
+
+#leftIcons{
+    justify-content: flex-start;
+}
+#rightIcons{
+    justify-content: flex-end;
+}
+
+#leftIcons>img, #rightIcons>img{
+    height: 25px;
+    margin-left:5px;
+    filter: brightness(20%);
+}
+
+#leftpanel{
+    display: flex;
+    flex: 1 0 170px;
+    flex-direction: column;
+    container-type: inline-size;
+    justify-content: space-between;
+}
+
+#speedpanel{
+    display: flex; 
+    flex-direction: column;
+    flex: 4 0 300px;
+    justify-content: center;
+    align-items: center;
+    container-type: inline-size;
+}
+
+#rightpanel{
+    display: flex;
+    flex: 1 0 170px;
+    flex-direction: column;
+    justify-content: space-between;
+    container-type: inline-size;
+}
+
+#batkmpanel{
+    align-self: flex-end;
+}
+
+#speedpanel svg, #powerpanel svg, #batterypanel svg {
+    stroke: #fff;
+    stroke-width: 2px;
+    fill: transparent;
+  }
+
+img#ctrltemp{margin-left: 15px;}
+
+text#speedometer{
+    font-size: 170px;
+    font-weight: bold;
+    fill: #fff;
+}
+
+text#epower, text#bat_soc, #drivemode,#speedunit{
+    font-size: 100px;
+    font-weight: bold;
+    fill: #fff;
+}
+
+#drivemode,#speedunit, text#range,#powerunit,text#avgpower{
+    font-size: 40px;
+    fill: #fff;
+}
+
+
+#powerunit,#speedunit{
+    opacity: 0.5;
+}

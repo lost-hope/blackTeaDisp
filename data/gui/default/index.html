@@ -1,32 +1,144 @@
 <!DOCTYPE html>
 <html>
     <head>
-        <title>ESP IOT DASHBOARD</title>
+        <title>BTM Wildfire - BlueKluntje</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <link rel="icon" type="image/png" href="favicon.png">
         <link rel="stylesheet" type="text/css" href="style.css">
+        <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+            <symbol id="icon-bat0"
+                height="20.117928"
+                viewBox="0 -960 711.7363 804.7171"
+                width="17.793407"
+                fill="currentColor"
+                xmlns="http://www.w3.org/2000/svg">
+                <path d="m 40,-160 c -11.33333,0 -20.83333,-3.83333 -28.5,-11.5 C 3.83333,-179.16667 
+                    0,-188.66667 0,-200 v -640 c 0,-11.33333 3.83333,-20.83333 11.5,-28.5 7.66667,-7.66667 
+                    17.16667,-11.5 28.5,-11.5 h 80 v -80 h 160 v 80 h 80 c 11.33333,0 20.83333,3.83333 
+                    28.5,11.5 7.66667,7.66667 11.5,17.16667 11.5,28.5 v 280 c -14,0 -27.66667,1.16667 
+                    -41,3.5 -13.33333,2.33333 -26.33333,5.83333 -39,10.5 V -800 H 80 v 560 h 94 c 
+                    5.33333,15.33333 11.83333,29.66667 19.5,43 7.66667,13.33333 16.83333,25.66667 27.5,37 z"/>
+                <path
+                    style="font-weight:bold;font-size:448.375px;line-height:1.25;font-family:'Noto Sans';stroke-width:37.3646"
+                    d="m 485.30647,-319.83664 q 0,51.56312 -11.20938,88.32987 -10.761,36.76675 -35.42162,56.49525 -24.21225,19.7285 -65.46275,19.7285 -57.84038,0 -84.74288,-43.49237 -26.9025,-43.94075 -26.9025,-121.06125 0,-52.0115 10.761,-88.77825 10.761,-36.76675 35.42163,-56.49525 24.66062,-19.7285 65.46275,-19.7285 57.392,0 84.74287,43.49237 27.35088,43.49238 27.35088,121.50963 z m -156.48288,0 q 0,54.70175 9.41588,82.501 9.41587,27.35087 34.97325,27.35087 25.109,0 34.97325,-27.35087 9.86425,-27.35088 9.86425,-82.501 0,-54.70175 -9.86425,-82.501 -9.86425,-27.79925 -34.97325,-27.79925 -25.55738,0 -34.97325,27.79925 -9.41588,27.79925 -9.41588,82.501 z" />
+            </symbol>
+            <symbol id="icon-bat1"
+                height="20.005831"
+                viewBox="0 -960 711.7363 800.23323"
+                width="17.793407"
+                fill="currentColor"
+                xmlns="http://www.w3.org/2000/svg"
+            >
+                <path d="m 40,-160 c -11.33333,0 -20.83333,-3.83333 -28.5,-11.5 C 3.83333,-179.16667 
+                    0,-188.66667 0,-200 v -640 c 0,-11.33333 3.83333,-20.83333 11.5,-28.5 7.66667,-7.66667 
+                    17.16667,-11.5 28.5,-11.5 h 80 v -80 h 160 v 80 h 80 c 11.33333,0 20.83333,3.83333 
+                    28.5,11.5 7.66667,7.66667 11.5,17.16667 11.5,28.5 v 280 c -14,0 -27.66667,1.16667 -41,3.5 
+                    -13.33333,2.33333 -26.33333,5.83333 -39,10.5 V -800 H 80 v 560 h 94 c 5.33333,15.33333 
+                    11.83333,29.66667 19.5,43 7.66667,13.33333 16.83333,25.66667 27.5,37 z"/>
+                    <path
+                    style="font-weight:bold;font-size:448.375px;line-height:1.25;font-family:'Noto Sans';stroke-width:37.3646"
+                    d="m 430.60472,-159.76677 h -67.70463 v -185.17887 q 0,-11.65775 0.44838,-30.4895 0.89675,-18.83175 1.34512,-33.17975 -2.24187,2.69025 -9.86425,9.86425 -7.174,6.72562 -13.45125,12.10612 l -36.76675,29.59275 -32.73137,-40.80212 103.12625,-82.05263 h 55.5985 z"/>
+            </symbol>
+
+        </svg>
     </head>
     <body>
-        <div class="topnav">
-            <h1>SENSOR READINGS (WEBSOCKET)</h1>
-        </div>
-        <div class="content">
-            <div class="card-grid">
-                <div class="card">
-                    <p class="card-title"> Volt</p>
-                    <p class="reading"><span id="total_voltage"></span>  mV</p>
+
+        <div id="maincontainer">
+            <div id="contentpanel">
+                <div id="leftpanel">
+                    <div id="powerpanel">
+                        <svg viewbox="0 0 400 300" style="height:100%">
+                            <circle id="powercircle" cx="200" cy="195" r="180"  stroke-width="30" />
+                            <circle id="spowercircle" cx="200" cy="195" r="180"  stroke-width="6" />
+                            <text x="200" y="66" text-anchor="middle" alignment-baseline="middle" id="powerunit">kW</text>
+                            <text x="200" y="180" text-anchor="middle" alignment-baseline="middle" id="epower">+11.7</text>
+                            <text x="200" y="280" text-anchor="middle" alignment-baseline="middle" id="avgpower">&oslash; 15.7 kWh</text>
+                          </svg>
+                    </div>
+                    <div>
+                        <img src="res/logo.svg" style="width:95%">
+                    </div>
+                    <div>
+                        <table class="datatab">
+
+                            <tr>
+                                <td class="ico">
+                                    <svg height="20.117928" width="17.793407" ><use href="#icon-bat0" /></svg>
+                                </td>
+                                <td class="val" colspan=3>
+                                    31 - 34 &#176;C
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="ico">
+                                    <svg height="20.005831" width="17.793407"><use href="#icon-bat1" /></svg>
+                                </td>
+                                <td class="val" colspan=3>
+                                    30 - 33 &#176;C
+                                </td>
+                            </tr>                            
+                            <tr>
+                                <td class="ico"><img id="enginetemp" src="res/ev_engine.svg"></td><td class="val">33 &#176;C</td>
+                                <td class="ico"><img id="ctrltemp" src="res/chip.svg"></td><td class="val">34 &#176;C</td>
+                            </tr>
+                        </table>
+                    </div>
                 </div>
-                <div class="card">
-                    <p class="card-title"> Time</p>
-                    <p class="reading"><span id="time"></span>  seconds</p>
+                <div id="speedpanel">
+                    <svg viewbox="0 0 400 400" style="height:100%">
+                        <circle id="sspeedcircle" cx="200" cy="200" r="184"  stroke-width="4" />
+                        <circle id="speedcircle" cx="200" cy="200" r="184"  stroke-width="22" />
+                        <text x="200" y="220" text-anchor="middle" alignment-baseline="middle" id="speedometer">103</text>
+                        <text x="200" y="90" text-anchor="middle" alignment-baseline="middle" id="speedunit">km/h</text>
+                        <text x="170" y="360" text-anchor="left" alignment-baseline="bottom" id="drivemode">NORMAL</text>
+                      </svg>
                 </div>
-                <div class="card">
-                    <p class="card-title"> Speed</p>
-                    <p class="reading"><span id="speed"></span> km/h</p>
+                <div id="rightpanel">
+                    <div id="batterypanel">
+                        <svg viewbox="0 0 400 400" style="height:100%">
+                            <circle id="sbattery0circle" cx="200" cy="200" r="180"  stroke-width="6" />
+                            <circle id="sbattery1circle" cx="200" cy="200" r="148"  stroke-width="6" />
+                            <circle id="battery0circle" cx="200" cy="200" r="180"  stroke-width="25" />
+                            <circle id="battery1circle" cx="200" cy="200" r="148"  stroke-width="25" />
+                            <text x="160" y="180" text-anchor="middle" alignment-baseline="middle" id="bat_soc">80.3 %</text>
+                            <text x="160" y="240" text-anchor="middle" alignment-baseline="middle" id="range">&thickapprox; 181 km</text>
+                        </svg>
+                    </div>
+                    <div id="batkmpanel">
+                        <table class="datatab">
+                            <tr>
+                                <td class="ico"><svg height="20.117928" width="17.793407" ><use href="#icon-bat0" /></svg></td><td class="val">37.3 % - 110.5 V</td>
+                            </tr>
+                            <tr>
+                                <td class="ico"><svg height="20.005831" width="17.793407"><use href="#icon-bat1" /></svg></td><td class="val">36.3 % - 108.5 V</td>
+                            </tr>
+                            <tr>
+                                <td class="ico"><div>TRP</div></td><td class="val">135.4 km</td>
+                            </tr>
+                            <tr>
+                                <td class="ico">ODO</td><td class="val">11503 km</td>
+                            </tr>
+                        </table>
+                    </div>
+
                 </div>
-                <div class="card">
-                    <p class="card-title"> SoC</p>
-                    <p class="reading"><span id="soc_perm"></span>  Promille</p>
+
+            </div>
+            <div id="statusbar">
+                <div id="leftIcons">
+                    <img id="leftIndicator" src="res/indicator.svg">
+                    <img id="highbeam" src="res/highbeam.svg">
+                    <img id="charger" src="res/charger.svg">
+                </div>
+                <div id="clock">
+                    12:00pm
+                </div>
+                <div id="rightIcons">
+                    <img style="filter: brightness(100%);;" src="res/bt2.svg">
+                    <img src="res/temp.svg">
+                    <img src="res/ev_engine.svg">
+                    <img id="rightIndicator" src="res/indicator.svg">
                 </div>
             </div>
         </div>

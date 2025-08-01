@@ -20,10 +20,28 @@ async function getData() {
     }
   }
 
+function powermeter(power){
+    const canvas = document.getElementById("powermeter");
+    const ctx = canvas.getContext("2d");
+
+    ctx.beginPath();
+    ctx.arc(95, 50, 40, 0, Math.PI);
+ctx.fillStyle = "red";
+ctx.fill();
+ctx.stroke();
+}
+
 function onload(event) {
-    speedmeter(270);
-    getData();
-    initWebSocket();
+    speedmeter('sspeedcircle',270,7);
+    speedmeter('speedcircle',180,7);
+    speedmeter('spowercircle',240,8);
+    speedmeter('powercircle',40,0);
+    speedmeter('sbattery0circle',240,11);
+    speedmeter('sbattery1circle',240,11);
+    speedmeter('battery0circle',120,11);
+    speedmeter('battery1circle',140,11);
+    //getData();
+    //initWebSocket();
     ftime();
     
 }
@@ -127,22 +145,30 @@ function ftime() {
         m = n.getMinutes(),
         s = n.getSeconds();
    
-    document.getElementById('clock').innerHTML = h + ((s%2)?':':' ') + (m<10?"0":"")+m ;
+    document.getElementById('clock').innerHTML = h + '<span id="colon">:</span>' + (m<10?"0":"")+m ;
+    document.querySelector('#clock>#colon').style.visibility=(s%2)?"hidden":"visible";
     setTimeout(ftime, 500);
   }
 
   
 
   // All calculations are within 'run' function.
- function speedmeter(angle) {
-    const circle = document.querySelector('#speedcircle');
+ function speedmeter(id,angle,startoclock=0) {
+    console.log("setting "+id)
+    const circle = document.querySelector('#'+id);
     // 1. Get angle from input field.
     //let angle = parseFloat(input.value) || 0;
   
     // 2. Radius of SVG circle.
-    const radius = 200;
+    // console.log(circle.getAttribute("r"));
+    // console.log("realh: "+circle.getBoundingClientRect()['height'])
+    // const radius = circle.getBoundingClientRect()['height']/2;
+    // console.log("Radius="+radius);
+
+    radius=circle.getAttribute("r");
+    
     const circumference = 2 * Math.PI * radius;
-  
+    console.log("rad:"+radius+"u="+circumference)
     // 3. First, 1/4 of circumfence of 90 degrees. To start from top of the view,
     //    we must rotate it by 90 degrees. By default circle will start on the right.
     //    Stroke offset effectively rotates the circle.
@@ -153,9 +179,9 @@ function ftime() {
     //    this entire circle to be visible - (angle / 360 degrees) returns a percentage value
     //    (between 0.0 and 1.0) of how much circumference should be visible.
     //    Hence, we then multiply (angle / 360) times the entire circumference.
-    const strokeOffset = (5 / 8) * circumference;
+    const strokeOffset = (-(startoclock-3)/12) * circumference;
     const strokeDasharray = (angle / 360) * circumference;
-  
+
     // 5. Set circle radius
     circle.setAttribute('r', radius);
     // 6. Create dash array of two elements (combined they must equal the entire circumference).

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <style>
+            input:invalid{
+                border: 2px solid red;
+            }
+            input:valid{
+                border: 2px solid green;
+            }
+
+            tr.ends td{
+                border-bottom:2px solid #000
+            }
+        </style>
+        <title>BTM Wildfire - BlueKluntje</title>
+    </head>
+    <body>
+        <h1>Config Page</h1>
+        <form>
+            <table>
+                <tr>
+                    <td>
+                        <label for="wifi_ap_ssid">Wifi ap ssid:</label>
+                    </td>
+                    <td>
+                        <input type="text" id="wifi_ap_ssid" name="wifi_ap_ssid" pattern=".{5,}">            
+                    </td>
+                </tr>
+                <tr class="ends">
+                    <td>
+                        <label for="wifi_ap_password">Wifi ap password:</label>
+                    </td>
+                    <td>
+                        <input type="text" id="wifi_ap_password" name="wifi_ap_password" pattern=".{5,}">            
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="wifi_private_ssid">Wifi private ssid:</label>
+                    </td>
+                    <td>
+                        <input type="text" id="wifi_private_ssid" name="wifi_private_ssid" pattern=".{5,}">            
+                    </td>
+                </tr>
+                <tr class="ends">
+                    <td>
+                        <label for="wifi_private_password">Wifi private password:</label>
+                    </td>
+                    <td>
+                        <input type="text" id="wifi_private_password" name="wifi_private_password" pattern=".*">            
+                    </td>
+                </tr>
+                <tr class="ends">
+                    <td>
+                        <label for="odometer">Odometer (km x10)</label>
+                    </td>
+                    <td>
+                        <input type="text" id="odometer" name="odometer" pattern="[0-9]{1,8}">            
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="bat0_mac">BMS 0 mac-address:</label>
+                    </td>
+                    <td>
+                        <input type="text" id="bat0_mac" name="bat0_mac" pattern="([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}">            
+                        <label for="bat0_en">enabled?</label>
+                        <input type="checkbox" id="bat0_en" name="bat0_en">
+                    </td>
+                </tr>
+                <tr class="ends">
+                    <td>
+                        <label for="bat1_mac">BMS 1 mac-address:</label>
+                    </td>
+                    <td>
+                        <input type="text" id="bat1_mac" name="bat1_mac">
+                        <label for="bat1_en">enabled?</label>
+                        <input type="checkbox" id="bat1_en" name="bat1_en">
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="ctrl_serial">Serial-Number (JSW...) of Fardriver Controller:</label>
+                    </td>
+                    <td>
+                        <input type="text" id="ctrl_serial" name="ctrl_serial" value="">
+                        <label for="ctrl_en">enabled?</label>
+                        <input type="checkbox" id="ctrl_en" name="ctrl_en">
+                    </td>
+                </tr>
+                <tr>
+                    <td colspan=2><button type="button" id="sendbutton" onClick="sendData()">save</button></td>
+                </tr>
+            </table>
+        </form>
+        <script>
+            var base_url = `http://${window.location.hostname}`;
+            //base_url ="http://192.168.11.85/";
+
+            function onload(){
+                fetch(base_url+'/get_config', {
+                    method: 'GET'
+                })
+                .then((response) => response.json())
+                .then((d) => {
+
+                    console.log(d)
+
+                    document.querySelector("#odometer").checked=d.odometer;
+
+                    document.querySelector("#ctrl_serial").value=d.ctrl_serial;
+                    document.querySelector("#ctrl_en").checked=d.ctrl_enabled;
+                    for(i=0;i<d.batteries.length;i++){
+                        document.querySelector("#bat"+i+"_mac").value=d.batteries[i].mac;
+                        document.querySelector("#bat"+i+"_en").checked=d.batteries[i].enabled;
+                    }
+                });
+            }
+            
+            function sendData(){
+                var formData = new FormData( document.querySelector("form") )
+                
+                data = Object.fromEntries(formData)
+                console.log(data)
+                for(i=0;i<2;i++){
+                    if(data["bat"+i+"_en"] == undefined){
+                        data["bat"+i+"_en"] = false 
+                    }else{
+                        data["bat"+i+"_en"] = true
+                    }
+                }
+                if(data["ctrl_en"] == undefined){
+                        data["ctrl_en"] = false 
+                    }else{
+                        data["ctrl_en"] = true
+                }
+
+                console.log(data)
+
+
+                let jdata=JSON.stringify(data);
+                fetch(base_url+'/update_config', {
+                    method: 'POST',
+                    body: jdata
+                }).then((response) => { 
+                // do something with response here... 
+                });
+            }
+            
+            //window.addEventListener('load', onload);
+            
+            
+        </script>
+    </body>
+</html>
