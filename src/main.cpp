@@ -1,35 +1,27 @@
-
-/**
- *  NimBLE_Async_client Demo:
- *
- *  Demonstrates asynchronous client operations.
- *
- *  Created: on November 4, 2024
- *      Author: H2zero
- */
-
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <NimBLEDevice.h>
+#include <Preferences.h>
 #include <ESPAsyncWebServer.h>
 #include "LittleFS.h"
-
-
-
-
-
+#include <regex.h>
 
 #define BT_DALY_CMD_SOC  0x90
 #define BT_DALY_CMD_VRANGE 0x91
 #define BT_DALY_CMD_TRANGE 0x92
 #define BT_DALY_CMD_PARAMS 0x50
 
+#define IGNORE_LIST_SIZE 20
+
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
 
 // Create a WebSocket object
 AsyncWebSocket ws("/ws");
+
+// Store preferences and
+Preferences persistentData;
 
 //
 JsonDocument alldata_doc;
@@ -43,23 +35,10 @@ void initLittleFS() {
     Serial.println("LittleFS mounted successfully");
 }
 
-
-
 enum BtType{
     BMS_DALY,
     CTRL_FARDRIVER
 };
-
-// struct BtDevice{
-//     const String name;
-//     uint32_t refresh_int_ms=200;
-//     uint32_t last_refresh_ms=200;
-//     NimBLEAddress address;
-//     const String bt_id;
-//     const BtType type;
-//     bool enabled=true;
-//     NimBLEClient* client;
-// };
 
 struct CtrlData{
     char recvd_model_no[21];
@@ -115,6 +94,12 @@ struct DalyBmsDevice{
     BmsData data;
 };
 
+uint64_t odometer;
+String wifi_ap_ssid;
+String wifi_ap_password;
+String wifi_private_ssid;
+String wifi_private_password;
+
 struct FarDriverControllerDevice{
     const String name;
     NimBLEClient* client;
@@ -125,9 +110,10 @@ struct FarDriverControllerDevice{
     //the internal id  (e.g. JSWX....... ) of the controller; used instead of dynamic mac to identify this exact controller!
     char true_model_no[21];
    
-    NimBLEAddress wrong_addresses[20];
+    NimBLEAddress wrong_addresses[IGNORE_LIST_SIZE];
     uint8_t wa_index=0;
     unsigned long last_subscription=0;
+    unsigned long last_scan=0;
 
     CtrlData data;
 };
@@ -135,17 +121,26 @@ struct FarDriverControllerDevice{
 
 #include "config.h"
 
-/**
- * @return true if values was changed, false if not
- */
-template <typename T> bool update_if_changed(T* store,T new_val,JsonVariant json){
-    if((*store) != new_val){
-        (*store)=new_val;
-        json.set(new_val);
-        return true;
-    }
-    return false;
+bool is_valid_mac_address(String fs){
+    regex_t reegex;
+    int v=regcomp( &reegex, "^([0-9a-f]{2}:){5}[0-9a-f]{2}$", REG_EXTENDED | REG_NOSUB);
+    if(regexec(&reegex, fs.c_str(), 0, NULL, 0)!=0) {
+        return false;  
+    } 
+    return true;
 }
+
+// /**
+//  * @return true if values was changed, false if not
+//  */
+// template <typename T> bool update_if_changed(T* store,T new_val,JsonVariant json){
+//     if((*store) != new_val){
+//         (*store)=new_val;
+//         json.set(new_val);
+//         return true;
+//     }
+//     return false;
+// }
 
 void ws_send(JsonDocument& doc) {
     const size_t len = measureJson(doc);
@@ -208,7 +203,7 @@ void verify_model_no(NimBLERemoteCharacteristic* pRemoteCharacteristic,uint8_t* 
         pRemoteCharacteristic->unsubscribe();
         //add wrong address to ignore-list-ring
         fardriver_controller_device.wrong_addresses[fardriver_controller_device.wa_index]=fardriver_controller_device.client->getPeerAddress();
-        fardriver_controller_device.wa_index=(fardriver_controller_device.wa_index+1)%20;
+        fardriver_controller_device.wa_index=(fardriver_controller_device.wa_index+1)%IGNORE_LIST_SIZE;
         fardriver_controller_device.client->disconnect();
         
     }
@@ -263,8 +258,11 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
             doc["controller"]["engine_temp"]=cd->engine_temp=(int16_t)((pData[3] &0xFF)<<8 | pData[2])  ;
         }else if(pData[1]==0x8b){   //matches 0x1e ????
             return;
-        }else if(pData[1]==0x86){   //matches 0xd6 ?! not that sure, but 0x86,0x93 could also be a candidate
-            doc["controller"]["controller_temp"]=cd->controller_temp=(int16_t)((pData[11] &0xFF)<<8 | pData[12])  ;
+        }else if(pData[1]==0xb3){   //matches 0xd6 ?! not that sure, but 0x86,0xb3 could also be a candidate
+            //0xb3[12] gives a value that behaves like a temperature (getting smaller after stopping & cooling down)
+            //0xb3[11] on the other hand alternates: going 0->1 every ~30-60s, than after 2s going back 1->0 this does
+            //not look temperaturish. Maybe the mos-temp is only uint8_t in [12]?
+            doc["controller"]["controller_temp"]=cd->controller_temp=(int16_t)(pData[12])  ;
         }else if(pData[1]==0x94){   //matches 0x69 !!!!
             return;
         }else{
@@ -283,6 +281,14 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
 
 }
 
+template <typename T> void set_single(T* store, T val, String path){
+    JsonDocument doc;
+    (*store)=val;
+    doc["path"]=path;
+    doc["val"]=val;
+    ws_send(doc);
+}
+
 void notifycb_bms_daly(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
     int bms_i=get_bms_index_by_client(pRemoteCharacteristic->getClient());
     BmsData* bd=&daly_bms_devices[bms_i].data;
@@ -293,7 +299,9 @@ void notifycb_bms_daly(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_
     JsonDocument doc;
     
     if(pData[2]==BT_DALY_CMD_SOC){
-        doc["batteries"][bms_i]["soc_perm"]=bd->soc_perm=(uint16_t)((pData[10] &0xFF)<<8 | pData[11]) ;
+
+        set_single<uint16_t>(&bd->soc_perm,(uint16_t)((pData[10] &0xFF)<<8 | pData[11]),String("$.batteries["+bms_i)+"].soc_perm");
+
         //update_if_changed<uint16_t>(&bd->soc_perm,(uint16_t)((pData[10] &0xFF)<<8 | pData[11]),doc["batteries"][bms_i]["soc_perm"]);
         doc["batteries"][bms_i]["current_ma"]=bd->current_ma=((int64_t)((pData[8] &0xFF)<<8 | pData[9])-30000)*100;
         doc["batteries"][bms_i]["volt_tot_mv"]=bd->volt_tot_mv=(uint16_t)((pData[4] &0xFF)<<8 | pData[5])       *100;
@@ -355,7 +363,7 @@ bool query_daly_bms(){
     for(int i=0;i<BMS_MAX_DEVS;i++){
         DalyBmsDevice* d=&daly_bms_devices[i];
         
-        if(!d->client->isConnected()){
+        if(!d->enabled || !d->client->isConnected()){
             continue;
         }
 
@@ -416,12 +424,33 @@ bool query_daly_bms(){
 }
 void initWiFi(){
     WiFi.mode(WIFI_AP_STA);
-    WiFi.softAP(ap_ssid, ap_password);
-    WiFi.begin(private_ssid, private_password);
+    WiFi.softAP(wifi_ap_ssid, wifi_ap_password);
+    if(wifi_private_ssid!=""){
+        WiFi.begin(wifi_private_ssid, wifi_private_password);
+    }
     IPAddress apIP = WiFi.softAPIP();
     IPAddress privateIP= WiFi.localIP();
 
     Serial.printf("AP IP: %s, Client IP: %s \n", apIP.toString().c_str(),privateIP.toString().c_str());
+}
+
+void savePersistentToNVS(){
+    persistentData.putULong64("odometer", odometer);
+
+    persistentData.putBool("ctrl_enabled", fardriver_controller_device.enabled);
+    persistentData.putString("ctrl_model_no",fardriver_controller_device.true_model_no);
+
+    for(int i=0;i<BMS_MAX_DEVS;i++){
+        String akey="bat";
+        akey.concat(i);
+        String ekey=akey;
+        akey.concat("_address");
+        ekey.concat("_enabled");
+
+        persistentData.putString(akey.c_str(),daly_bms_devices[i].address.toString().c_str());
+        persistentData.putBool(ekey.c_str(),daly_bms_devices[i].enabled);
+    }
+
 }
 
 void setup_webserver_websocket(){
@@ -429,6 +458,9 @@ void setup_webserver_websocket(){
 
         for(int i=0;i<BMS_MAX_DEVS;i++){
             BmsData* bd=&daly_bms_devices[i].data;
+            alldata_doc["batteries"][i]["enabled"]=daly_bms_devices[i].enabled;
+            alldata_doc["batteries"][i]["connected"]=daly_bms_devices[i].client->isConnected();
+
             alldata_doc["batteries"][i]["soc_perm"]=bd->soc_perm;
             alldata_doc["batteries"][i]["current_ma"]=bd->current_ma;
             alldata_doc["batteries"][i]["volt_tot_mv"]=bd->volt_tot_mv;
@@ -446,6 +478,9 @@ void setup_webserver_websocket(){
             alldata_doc["batteries"][i]["capacity_mah"]=bd->capacity_mah;
         }
         CtrlData* cd=&fardriver_controller_device.data;
+
+        alldata_doc["controller"]["enabled"]=fardriver_controller_device.enabled;
+        alldata_doc["controller"]["connected"]=fardriver_controller_device.client->isConnected();
 
         alldata_doc["controller"]["model_no"]=cd->recvd_model_no;
         alldata_doc["controller"]["wheel_radius"]=cd->wheel_radius;
@@ -473,18 +508,124 @@ void setup_webserver_websocket(){
 
 
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(LittleFS, "/gui/default/index.html", "text/html");
+        //request->send(LittleFS, "/gui/default/index.html", "text/html");
+        request->redirect("gui/default/index.html");
       });
+
+    server.on("/get_config", HTTP_GET, [](AsyncWebServerRequest *request) {
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        JsonDocument doc;
+        JsonObject root = doc.to<JsonObject>();
+
+        root["wifi_private_password"] = wifi_private_password;
+        root["wifi_private_ssid"] = wifi_private_ssid;
     
-    server.serveStatic("/", LittleFS, "/");
+        root["wifi_ap_password"] = wifi_ap_password;
+        root["wifi_ap_ssid"] = wifi_ap_ssid;
+
+        root["odometer"] = odometer;
+
+        root["ctrl_serial"] = fardriver_controller_device.true_model_no;
+        root["ctrl_enabled"] = true;
+
+        JsonArray arr = root["batteries"].to<JsonArray>();
+        for(int i=0;i<BMS_MAX_DEVS;i++){
+            arr[i]["mac"] = daly_bms_devices[i].address.toString();
+            arr[i]["enabled"] = daly_bms_devices[i].enabled;
+        }
+
+
+        serializeJson(root, *response);
+        Serial.println();
+        request->send(response);
+    });
+
+    server.on("/update_config",
+            HTTP_POST,
+            [](AsyncWebServerRequest * request){},
+            NULL,
+            [](AsyncWebServerRequest * request, uint8_t *data, size_t len, size_t index, size_t total) {
+                for (size_t i = 0; i < len; i++) {
+                    Serial.write(data[i]);
+                }
+                JsonDocument doc;
+                deserializeJson(doc, data);
+                
+                //CHECK if exist else crash
+                Serial.printf("bat0 mac %s\n",doc["bat0_mac"].as<const char*>());
+                Serial.printf("bat0 en %s\n",doc["bat0_en"].as<const char*>());
+              //Handling function implementation
+              savePersistentToNVS();
+          }
+    );
+
+    
+    server.serveStatic("/gui", LittleFS, "/gui");
     server.addHandler(&ws);
     server.begin();
 }
 
 
 
+void loadPersistentFromNVS(){
+    odometer=persistentData.getULong64("odometer");
+
+    wifi_private_password = persistentData.getString("wifi_private_password");
+    wifi_private_ssid = persistentData.getString("wifi_private_ssid");
+
+    wifi_ap_password = persistentData.getString("wifi_ap_password");
+    wifi_ap_ssid = persistentData.getString("wifi_ap_ssid");
+
+    fardriver_controller_device.enabled=persistentData.getBool("ctrl_enabled");
+    const char* m=persistentData.getString("ctrl_model_no").c_str();
+    strncpy(fardriver_controller_device.true_model_no,m,21);
+
+    for(int i=0;i<BMS_MAX_DEVS;i++){
+        String akey="bat";
+        akey.concat(i);
+        String ekey=akey;
+        akey.concat("_address");
+        ekey.concat("_enabled");
+
+        daly_bms_devices[i].address=NimBLEAddress(persistentData.getString(akey.c_str()).c_str(),BLE_ADDR_RANDOM);
+        daly_bms_devices[i].enabled=persistentData.getBool(ekey.c_str());
+
+    }
+}
+
+void initPersistent(){
+    persistentData.begin("persistentData", false);   
+    // open (or create and then open if it does not yet exist) in RW mode.
+    if (persistentData.isKey("odo") == false) {
+        //init values
+        persistentData.putULong64("odometer", 0);
+
+        persistentData.putString("wifi_private_password","");
+        persistentData.putString("wifi_private_ssid","");
+    
+        persistentData.putString("wifi_ap_password","123456");
+        persistentData.putString("wifi_ap_ssid","My BTM Wildfire");
+
+        persistentData.putString("ctrl_model_no", "");
+        persistentData.putBool("ctrl_enabled", false);
+        for(int i=0;i<BMS_MAX_DEVS;i++){
+            String akey="bat";
+            akey.concat(i);
+            String ekey=akey;
+            akey.concat("_address");
+            ekey.concat("_enabled");
+            persistentData.putString(akey.c_str(), "");
+            persistentData.putBool(ekey.c_str() ,false);
+        }
+    }
+        
+    loadPersistentFromNVS();
+    
+}
+
 void setup() {
     Serial.begin(115200);
+    initPersistent();
     initLittleFS();     
     initWiFi();
     setup_webserver_websocket();
@@ -526,7 +667,7 @@ void connect_daly_bms(){
         DalyBmsDevice* d=&daly_bms_devices[i];
         
         
-        if(!d->client->isConnected()){
+        if(d->enabled && !d->client->isConnected()){
             d->client->setClientCallbacks(&clientCallbacks, false);
             Serial.printf("trying to connect to bms %u : %s\n",i, d->client->getPeerAddress().toString().c_str());
             if(!d->client->connect(true, true, false)){
@@ -538,10 +679,21 @@ void connect_daly_bms(){
     }
 }
 
+bool is_ignored(const NimBLEAdvertisedDevice* dev){
+    for(int i=0;i<IGNORE_LIST_SIZE;i++){
+        if(fardriver_controller_device.wrong_addresses[i].equals(dev->getAddress())){
+            return true;
+        }
+    }
+    return false;
+}
+
 void connect_fardriver_controller(){
-    if(!fardriver_controller_device.client->isConnected()){
+    if(!fardriver_controller_device.client->isConnected() && millis()-fardriver_controller_device.last_scan>10000){
+        fardriver_controller_device.last_scan=millis();
         NimBLEScan *pScan = NimBLEDevice::getScan();
-        NimBLEScanResults results = pScan->getResults(5 * 1000);
+        //TODO: Async?
+        NimBLEScanResults results = pScan->getResults(1 * 1000);
         for (int i = 0; i < results.getCount(); i++) {
             const NimBLEAdvertisedDevice *device = results.getDevice(i);
                     
@@ -550,6 +702,9 @@ void connect_fardriver_controller(){
             }
             //fardriver_controller_device.address=device->getAddress();
             //TODO: check if address was not falsified before and is on ignorelist
+            if(is_ignored(device)){
+                continue;
+            }
             fardriver_controller_device.verified=0;
             fardriver_controller_device.client->setClientCallbacks(&clientCallbacks, false);
             if(!fardriver_controller_device.client->connect(device->getAddress(),true, true, false)){
@@ -566,7 +721,7 @@ void connect_fardriver_controller(){
 
     //renew subscription every 1-2s as a keepalive as the controller stops sending data after about 2.5s
     if(millis()-fardriver_controller_device.last_subscription>1800){
-        Serial.printf("renew notify for controller");
+        Serial.printf("renew notify for controller\n");
         fardriver_controller_device.last_subscription=millis();
         query_fardriver_controller();
     }
@@ -576,7 +731,7 @@ void connect_fardriver_controller(){
 int wstesttime=0;
 
 void loop() {
-     delay(100);
+    delay(10);
 
     //fardriver controller
     connect_fardriver_controller();
@@ -585,7 +740,9 @@ void loop() {
     //daly bms systems
     connect_daly_bms();
     query_daly_bms();
-    //Serial.printf("loop-di-love\n");
+
+    //TODO: reconnect wifi-client if private wifi available
+
 
     if(millis()-wstesttime>500){
         wstesttime=millis();
@@ -593,12 +750,3 @@ void loop() {
     }
     ws.cleanupClients();
  }
-
-
-//TODO-List:
-// - non-retard gui
-// - only send values via ws if they have changed (-> performance)
-// - allow to set/store the configuration via webinterface (-> generic builds & flash-script can be published, ease of use)
-// - installscript!
-// - AVAS/Engine-Sound via i2s to notify pedestrians and to signal that bike is on (-> prevent unwanted pull on gas)
-// - build an y-adaptercable, to get indicator, headlight & speedometer-signals to be shown on screen
