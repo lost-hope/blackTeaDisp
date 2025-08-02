@@ -280,13 +280,17 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
 
 
 }
-
-template <typename T> void set_single(T* store, T val, String path){
-    JsonDocument doc;
-    (*store)=val;
-    doc["path"]=path;
-    doc["val"]=val;
-    ws_send(doc);
+/**
+ * @param path is of rfc6901 json pointer format
+ */
+template <typename T> void set_single(T* store, T val, String jsonpointer){
+    if((*store)!=val){
+        JsonDocument doc;
+        (*store)=val;
+        doc["ptr"]=jsonpointer;
+        doc["val"]=val;
+        ws_send(doc);
+    }
 }
 
 void notifycb_bms_daly(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
@@ -300,7 +304,7 @@ void notifycb_bms_daly(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_
     
     if(pData[2]==BT_DALY_CMD_SOC){
 
-        set_single<uint16_t>(&bd->soc_perm,(uint16_t)((pData[10] &0xFF)<<8 | pData[11]),String("$.batteries["+bms_i)+"].soc_perm");
+        set_single<uint16_t>(&bd->soc_perm,(uint16_t)((pData[10] &0xFF)<<8 | pData[11]),String("/batteries/"+bms_i)+"/soc_perm");
 
         //update_if_changed<uint16_t>(&bd->soc_perm,(uint16_t)((pData[10] &0xFF)<<8 | pData[11]),doc["batteries"][bms_i]["soc_perm"]);
         doc["batteries"][bms_i]["current_ma"]=bd->current_ma=((int64_t)((pData[8] &0xFF)<<8 | pData[9])-30000)*100;
@@ -496,6 +500,10 @@ void setup_webserver_websocket(){
         alldata_doc["controller"]["motion"]=cd->motion;
         alldata_doc["controller"]["sliding_backwards"]=cd->sliding_backwards;
         alldata_doc["controller"]["gear"]=cd->gear;
+
+        alldata_doc["controller"]["engine_temp"]=cd->engine_temp;
+        alldata_doc["controller"]["controller_temp"]=cd->controller_temp;
+
 
 
 

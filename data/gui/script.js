@@ -1,5 +1,7 @@
 var gateway = `ws://${window.location.hostname}/ws`;
 var websocket;
+
+var data;
 // Init web socket when the page loads
 window.addEventListener('load', onload);
 
@@ -11,37 +13,26 @@ async function getData() {
         throw new Error(`Response status: ${response.status}`);
       }
   
-      const json = await response.json();
-      console.log(json);
-      parseData(json);
+      data= await response.json();
+
+      //parseData(json);
+
+      updateGUI();
       
     } catch (error) {
       console.error(error.message);
     }
   }
 
-function powermeter(power){
-    const canvas = document.getElementById("powermeter");
-    const ctx = canvas.getContext("2d");
-
-    ctx.beginPath();
-    ctx.arc(95, 50, 40, 0, Math.PI);
-ctx.fillStyle = "red";
-ctx.fill();
-ctx.stroke();
-}
 
 function onload(event) {
     speedmeter('sspeedcircle',270,7);
-    speedmeter('speedcircle',180,7);
     speedmeter('spowercircle',240,8);
-    speedmeter('powercircle',40,0);
     speedmeter('sbattery0circle',240,11);
     speedmeter('sbattery1circle',240,11);
-    speedmeter('battery0circle',120,11);
-    speedmeter('battery1circle',140,11);
-    //getData();
-    //initWebSocket();
+
+    getData();
+    initWebSocket();
     ftime();
     
 }
@@ -131,10 +122,66 @@ function parseData(myObj){
     }*/
 }
 
+function updateE(id,val){
+    document.getElementById(id).innerHTML = val;
+}
+
+function updateGUI(){
+    let d=data;
+    updateE("v_engine_t",d.controller.engine_temp);
+    updateE("v_ctrl_t",d.engine_temp);
+
+    updateE("v_gear",d.controller.gear);
+
+    updateE("v_speed",d.controller.cur_speed_kmh);
+    speedmeter('speedcircle',Math.min(150,d.controller.cur_speed_kmh)*270/150,7);
+
+    let cpower=((d.batteries[0].volt_tot_mv/1000*d.batteries[0].current_ma/1000+d.batteries[1].volt_tot_mv/1000*d.batteries[1].current_ma/1000)/1000).toFixed(1);
+    updateE("v_cur_power",cpower);
+    if(cpower>=0){
+        speedmeter('powercircle',(cpower/35)*120,12);
+    }else{
+        //maybe other scale for recurr?
+        speedmeter('powercircle',(cpower/10)*120,12);
+    }
+
+    updateE("v_odo",d.odometer);
+    updateE("v_trip",d.trip);
+    updateE("v_range",d.range);
+
+    updateE("v_bat0_soc",(d.batteries[0].soc_perm/10).toFixed(1)); 
+    speedmeter('battery0circle',d.batteries[0].soc_perm*240/1000,11);
+    updateE("v_bat0_v",(d.batteries[0].volt_tot_mv/1000).toFixed(1));
+    updateE("v_bat0_min_t",d.batteries[0].lowest_temp);
+    updateE("v_bat0_max_t",d.batteries[0].highest_temp);
+    
+
+    updateE("v_bat1_soc",(d.batteries[1].soc_perm/10).toFixed(1)); 
+    speedmeter('battery1circle',d.batteries[1].soc_perm*240/1000,11);
+    updateE("v_bat1_v",(d.batteries[1].volt_tot_mv/1000).toFixed(1));
+    updateE("v_bat1_min_t",d.batteries[1].lowest_temp);
+    updateE("v_bat1_max_t",d.batteries[1].highest_temp);
+    
+
+    updateE("v_bat_soc",(d.batteries[0].soc_perm/20+d.batteries[1].soc_perm/20).toFixed(1)); 
+
+
+
+}
 
 function onMessage(event) {
-    console.log(event.data)
-    parseData(JSON.parse(event.data));
+    
+    let d=JSON.parse(event.data);
+    console.log(d);
+    keys=d.ptr.split("/");
+    //remove starting slash
+    keys.splice(0,1);
+    for(i=0;i<keys.length-1;i++){
+        tmp=d[keys[i]]
+    }
+    tmp[keys[keys.length-2]]=d.val;
+    updateGUI();
+   // parseData();
 }
 
 
