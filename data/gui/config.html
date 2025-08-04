@@ -90,6 +90,14 @@
                     </td>
                 </tr>
                 <tr>
+                    <td>
+                        <label for="ctrl_name">Bluetooth name of Fardriver Controller:</label>
+                    </td>
+                    </tr>
+                        <input type="text" id="ctrl_name" name="ctrl_name" value="">
+                    <td>
+                </tr>
+                <tr>
                     <td colspan=2><button type="button" id="sendbutton" onClick="sendData()">save</button></td>
                 </tr>
             </table>
@@ -110,6 +118,7 @@
                     document.querySelector("#odometer").checked=d.odometer;
 
                     document.querySelector("#ctrl_serial").value=d.ctrl_serial;
+                    document.querySelector("#ctrl_bt_name").value=d.ctrl_bt_name;
                     document.querySelector("#ctrl_en").checked=d.ctrl_enabled;
                     for(i=0;i<d.batteries.length;i++){
                         document.querySelector("#bat"+i+"_mac").value=d.batteries[i].mac;
@@ -123,26 +132,33 @@
                 
                 data = Object.fromEntries(formData)
                 console.log(data)
+                var jdata={}
+                jdata.batteries=[];
                 for(i=0;i<2;i++){
+                    jdata.batteries[i]={}
+                    jdata.batteries[i].address=data["bat"+i+"_mac"]
                     if(data["bat"+i+"_en"] == undefined){
-                        data["bat"+i+"_en"] = false 
+                        jdata["batteries"][i].enabled = false 
                     }else{
-                        data["bat"+i+"_en"] = true
+                        jdata["batteries"][i].enabled = true 
                     }
                 }
+                jdata.controller={}
+                jdata.controller.serial=data.ctrl_serial;
+                jdata.controller.bt_name=data.ctrl_bt_name;
                 if(data["ctrl_en"] == undefined){
-                        data["ctrl_en"] = false 
+                        jdata["controller"].enabled = false 
                     }else{
-                        data["ctrl_en"] = true
+                        jdata["controller"].enabled = true
                 }
 
-                console.log(data)
+                console.log(jdata)
 
 
-                let jdata=JSON.stringify(data);
+                let json=JSON.stringify(jdata);
                 fetch(base_url+'/update_config', {
                     method: 'POST',
-                    body: jdata
+                    body: json
                 }).then((response) => { 
                 // do something with response here... 
                 });

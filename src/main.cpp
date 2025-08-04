@@ -58,6 +58,7 @@ struct CtrlData{
 
     int16_t engine_temp;
     int16_t controller_temp;
+    uint64_t odometer_raw;
 };
 
 struct BmsData{
@@ -67,9 +68,9 @@ struct BmsData{
     int64_t current_ma;
     uint32_t volt_tot_mv;
 
-    uint8_t highest_temp;
+    int16_t highest_temp;
     uint8_t highest_temp_cell;
-    uint8_t lowest_temp;
+    int16_t lowest_temp;
     uint8_t lowest_temp_cell;
 
     uint16_t highest_v_mv;
@@ -94,7 +95,13 @@ struct DalyBmsDevice{
     BmsData data;
 };
 
+uint64_t trip_start;
 uint64_t odometer;
+uint64_t odometer_last_store;
+bool odometer_inited=false;
+uint64_t odometer_last_raw;
+
+
 String wifi_ap_ssid;
 String wifi_ap_password;
 String wifi_private_ssid;
@@ -122,6 +129,9 @@ struct FarDriverControllerDevice{
 #include "config.h"
 
 bool is_valid_mac_address(String fs){
+    if(fs==NULL){
+        return false;
+    }
     regex_t reegex;
     int v=regcomp( &reegex, "^([0-9a-f]{2}:){5}[0-9a-f]{2}$", REG_EXTENDED | REG_NOSUB);
     if(regexec(&reegex, fs.c_str(), 0, NULL, 0)!=0) {
@@ -129,18 +139,6 @@ bool is_valid_mac_address(String fs){
     } 
     return true;
 }
-
-// /**
-//  * @return true if values was changed, false if not
-//  */
-// template <typename T> bool update_if_changed(T* store,T new_val,JsonVariant json){
-//     if((*store) != new_val){
-//         (*store)=new_val;
-//         json.set(new_val);
-//         return true;
-//     }
-//     return false;
-// }
 
 void ws_send(JsonDocument& doc) {
     const size_t len = measureJson(doc);
@@ -151,6 +149,21 @@ void ws_send(JsonDocument& doc) {
     serializeJson(doc, buffer->get(), len);
     ws.textAll(buffer);
 }
+
+/**
+ * @param path is of rfc6901 json pointer format
+ */
+template <typename T> void set_single(T* store, T val, String jsonpointer){
+    if((*store)!=val){
+        JsonDocument doc;
+        (*store)=val;
+        doc["ptr"]=jsonpointer;
+        doc["val"]=val;
+        ws_send(doc);
+    }
+}
+
+
 
 class ClientCallbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pClient) override {
@@ -233,10 +246,11 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
         CtrlData* cd=&fardriver_controller_device.data;
         //here we are sure that we have the right controller and can retrieve data
         if(pData[1]==0xaf){         //matches d0 !!!!
-            cd->wheel_ratio=  pData[6] ;
-            cd->wheel_radius= pData[7] ;
-            doc["controller"]["avg_speed_kph"]=cd->avg_speed_kmh= pData[8] ;
-            cd->wheel_width= pData[9] ;
+            set_single<uint8_t>(&cd->wheel_ratio,pData[6],"/controller/wheel_ratio");
+            set_single<uint8_t>(&cd->wheel_radius,pData[7],"/controller/wheel_radius");
+            set_single<uint16_t>(&cd->avg_speed_kmh,pData[8],"/controller/avg_speed_kmh");
+            set_single<uint8_t>(&cd->wheel_width,pData[9],"/controller/wheel_width");
+            
            //is not 4 or 4000 as expected, but 40975 - maybe that means sth. different or just need to be divided by 10?
            //changing the val in the app changes this value:
            // 1: 59935, 4: 40975, 5: 34835, 6: 28695, 8: 16415
@@ -244,33 +258,58 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
             
            cd->rate_ratio =4000; //override for now
         }else if(pData[1]==0xb0){   //matches 0xe2 !!!!
-            cd->cur_rpm=(uint16_t)((pData[9] &0xFF)<<8 | pData[8]) ;
+            set_single<uint16_t>(&cd->cur_rpm,(uint16_t)((pData[9] &0xFF)<<8 | pData[8]),"/controller/cur_rpm");
+
                                                   //rpm     2*pi*60min/(100000) *(gesamtradius                              -->)
-            doc["controller"]["cur_speed_kmh"]=cd->cur_speed_kmh=cd->cur_rpm * (0.00376991136f * (cd->wheel_radius * 1270.f + cd->wheel_width * cd->wheel_ratio) / cd->rate_ratio);
+            set_single<uint16_t>(&cd->cur_rpm,cd->cur_rpm * (0.00376991136f * (cd->wheel_radius * 1270.f + cd->wheel_width * cd->wheel_ratio) / cd->rate_ratio),"/controller/cur_speed_kmh");
             //Serial.printf("wheelratio: %u, wheel_radius: %u, wheel_width: %u, rate_ratio: %u, rpm: %u\n",wheel_ratio,wheel_radius,wheel_width,rate_ratio,cur_rpm);
             //ws.textAll(String("{ \"speed\": "+String(alldata_doc["engine"]["cur_speed_kph"])+"}"));
-            doc["controller"]["brake_switch"]=cd->brake_switch=(bool)(pData[5] & 0x80);
-            doc["controller"]["gear"]=cd->gear=(uint8_t)(pData[2] & 0x0c)/4+1;
-            doc["controller"]["sliding_backwards"]=cd->sliding_backwards=(bool)(pData[2] & 0x10);
-            doc["controller"]["motion"]=cd->motion=(bool)(pData[2] & 0x20);
+
+            set_single<bool>(&cd->brake_switch,(bool)(pData[5] & 0x80),"/controller/brake_switch");
+
+            set_single<uint8_t>(&cd->gear,(uint8_t)(pData[2] & 0x0c)/4+1,"/controller/gear");
+            set_single<bool>(&cd->sliding_backwards,(bool)(pData[2] & 0x10),"/controller/sliding_backwards");
+
+            if(cd->motion && !(bool)(pData[2] & 0x20)){
+                //bike has stopped, backup/store odometer
+                persistentData.putULong64("odometer", odometer);
+            }
+
+            set_single<bool>(&cd->motion,(bool)(pData[2] & 0x20),"/controller/motion");
+
+
 
         }else if(pData[1]==0xb5){   //matches 0xf4 !!!!
-            doc["controller"]["engine_temp"]=cd->engine_temp=(int16_t)((pData[3] &0xFF)<<8 | pData[2])  ;
+            set_single<int16_t>(&cd->engine_temp,(int16_t)((pData[3] &0xFF)<<8 | pData[2]),"/controller/engine_temp");
         }else if(pData[1]==0x8b){   //matches 0x1e ????
-            return;
+            
         }else if(pData[1]==0xb3){   //matches 0xd6 ?! not that sure, but 0x86,0xb3 could also be a candidate
             //0xb3[12] gives a value that behaves like a temperature (getting smaller after stopping & cooling down)
             //0xb3[11] on the other hand alternates: going 0->1 every ~30-60s, than after 2s going back 1->0 this does
             //not look temperaturish. Maybe the mos-temp is only uint8_t in [12]?
-            doc["controller"]["controller_temp"]=cd->controller_temp=(int16_t)(pData[12])  ;
+            set_single<int16_t>(&cd->controller_temp,(int16_t)(pData[12]),"/controller/engine_temp");
         }else if(pData[1]==0x94){   //matches 0x69 !!!!
-            return;
+            set_single<uint64_t>(&cd->odometer_raw,(uint16_t)((pData[11] &0xFF)<<8 | pData[10]),"/controller/odo_raw");
+            odometer_last_raw=cd->odometer_raw;
+            
+            if(!odometer_inited){
+                odometer_inited=true;
+            }else{
+                odometer=odometer+(cd->odometer_raw - odometer_last_raw);
+            }
+            //TODO: make odo and trip persist on specific criteria. 
+            //Idea: every 5 Kilometers and once as /controller/motion goes from true->false
+            if(odometer-odometer_last_store>50){
+                odometer_last_store=odometer;
+                persistentData.putULong64("odometer", odometer);
+            }
+
         }else{
             //return to prevent empty ws-messages
-            return;
+            
         }
-        doc["other"]["time"]=millis();
-        ws_send(doc);
+        //doc["other"]["uptime"]=millis();
+        //ws_send(doc);
         
         //alldata_doc["controller"]=doc["controller"];
 
@@ -280,18 +319,7 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
 
 
 }
-/**
- * @param path is of rfc6901 json pointer format
- */
-template <typename T> void set_single(T* store, T val, String jsonpointer){
-    if((*store)!=val){
-        JsonDocument doc;
-        (*store)=val;
-        doc["ptr"]=jsonpointer;
-        doc["val"]=val;
-        ws_send(doc);
-    }
-}
+
 
 void notifycb_bms_daly(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
     int bms_i=get_bms_index_by_client(pRemoteCharacteristic->getClient());
@@ -303,28 +331,30 @@ void notifycb_bms_daly(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_
     JsonDocument doc;
     
     if(pData[2]==BT_DALY_CMD_SOC){
-
         set_single<uint16_t>(&bd->soc_perm,(uint16_t)((pData[10] &0xFF)<<8 | pData[11]),String("/batteries/"+bms_i)+"/soc_perm");
-
-        //update_if_changed<uint16_t>(&bd->soc_perm,(uint16_t)((pData[10] &0xFF)<<8 | pData[11]),doc["batteries"][bms_i]["soc_perm"]);
-        doc["batteries"][bms_i]["current_ma"]=bd->current_ma=((int64_t)((pData[8] &0xFF)<<8 | pData[9])-30000)*100;
-        doc["batteries"][bms_i]["volt_tot_mv"]=bd->volt_tot_mv=(uint16_t)((pData[4] &0xFF)<<8 | pData[5])       *100;
+        set_single<int64_t>(&bd->current_ma,((int64_t)((pData[8] &0xFF)<<8 | pData[9])-30000)*100,String("/batteries/"+bms_i)+"/current_ma");
+        set_single<uint32_t>(&bd->volt_tot_mv,(uint32_t)((pData[4] &0xFF)<<8 | pData[5])*100,String("/batteries/"+bms_i)+"/volt_tot_mv");
         Serial.printf("SoC: %.1f %%, V_tot: %.1f V, current: %.1f A\n",bd->soc_perm/10.0,bd->volt_tot_mv/1000.0,bd->current_ma/1000.0);
     }else if(pData[2]==BT_DALY_CMD_TRANGE){
-        doc["batteries"][bms_i]["highest_temp"]=bd->highest_temp=pData[4] -40 ;
-        doc["batteries"][bms_i]["highest_temp_cell"]=bd->highest_temp_cell=pData[5] ;
-        doc["batteries"][bms_i]["lowest_temp"]=bd->lowest_temp=pData[6] -40 ;
-        doc["batteries"][bms_i]["lowest_temp_cell"]=bd->lowest_temp_cell=pData[7] ;
+
+        //        set_single<uint32_t>(sto,val,String("/batteries/"+bms_i)+"/volt_tot_mv");
+
+        set_single<int16_t>(&bd->highest_temp,pData[4] -40,String("/batteries/"+bms_i)+"/highest_temp");
+        set_single<uint8_t>(&bd->highest_temp_cell,pData[5],String("/batteries/"+bms_i)+"/highest_temp_cell");
+        set_single<int16_t>(&bd->lowest_temp,pData[6] -40,String("/batteries/"+bms_i)+"/lowest_temp");
+        set_single<uint8_t>(&bd->lowest_temp_cell,pData[7],String("/batteries/"+bms_i)+"/lowest_temp_cell");
+
         Serial.printf("highT(no. %u): %i °C, lowT(no. %u): %i °C\n", bd->highest_temp_cell,bd->highest_temp, bd->lowest_temp_cell,bd->lowest_temp);
     }else if(pData[2]==BT_DALY_CMD_VRANGE){
-        doc["batteries"][bms_i]["highest_v_mv"]=bd->highest_v_mv=(uint16_t)((pData[4] &0xFF)<<8 | pData[5])  ;
-        doc["batteries"][bms_i]["highest_v_cell"]=bd->highest_v_cell=pData[6] ;
-        doc["batteries"][bms_i]["lowest_v_mv"]=bd->lowest_v_mv=(uint16_t)((pData[7] &0xFF)<<8 | pData[8])  ;
-        doc["batteries"][bms_i]["lowest_v_cell"]=bd->lowest_v_cell=pData[9] ;
+        set_single<uint16_t>(&bd->highest_v_mv,(uint16_t)((pData[4] &0xFF)<<8 | pData[5]),String("/batteries/"+bms_i)+"/highest_v_mv");
+        set_single<uint8_t>(&bd->highest_v_cell,pData[6],String("/batteries/"+bms_i)+"/highest_v_cell");
+        set_single<uint16_t>(&bd->lowest_v_mv,(uint16_t)((pData[7] &0xFF)<<8 | pData[8]),String("/batteries/"+bms_i)+"/lowest_v_mv");
+        set_single<uint8_t>(&bd->lowest_v_cell,pData[9],String("/batteries/"+bms_i)+"/lowest_v_cell");
+
         Serial.printf("highV(no. %u): %i °mV, lowV(no. %u): %i mV\n", bd->highest_v_cell,bd->highest_v_mv, bd->lowest_v_cell,bd->lowest_v_mv);
     }else if(pData[2]==BT_DALY_CMD_PARAMS){
         //example: A501 5008 0000 C350 00000E102F
-        doc["batteries"][bms_i]["capacity_mah"]=bd->capacity_mah=(uint32_t)((pData[4]<<24) | (pData[5] <<16) |(pData[6]<<8) | pData[7]) ;
+        set_single<uint32_t>(&bd->capacity_mah,(uint32_t)((pData[4]<<24) | (pData[5] <<16) |(pData[6]<<8) | pData[7]),String("/batteries/"+bms_i)+"/capacity_mah");
     }else{
         Serial.printf("-> Notify from BMS\n");
         debug_notify(pRemoteCharacteristic, pData, length, isNotify);
@@ -440,6 +470,7 @@ void initWiFi(){
 
 void savePersistentToNVS(){
     persistentData.putULong64("odometer", odometer);
+    persistentData.putULong64("trip_start", trip_start);
 
     persistentData.putBool("ctrl_enabled", fardriver_controller_device.enabled);
     persistentData.putString("ctrl_model_no",fardriver_controller_device.true_model_no);
@@ -504,6 +535,11 @@ void setup_webserver_websocket(){
         alldata_doc["controller"]["engine_temp"]=cd->engine_temp;
         alldata_doc["controller"]["controller_temp"]=cd->controller_temp;
 
+        //other and calculated values
+
+        alldata_doc["other"]["odometer"]=odometer;
+        alldata_doc["other"]["trip"]=odometer-trip_start;
+
 
 
 
@@ -538,7 +574,7 @@ void setup_webserver_websocket(){
 
         JsonArray arr = root["batteries"].to<JsonArray>();
         for(int i=0;i<BMS_MAX_DEVS;i++){
-            arr[i]["mac"] = daly_bms_devices[i].address.toString();
+            arr[i]["address"] = daly_bms_devices[i].address.toString();
             arr[i]["enabled"] = daly_bms_devices[i].enabled;
         }
 
@@ -560,8 +596,24 @@ void setup_webserver_websocket(){
                 deserializeJson(doc, data);
                 
                 //CHECK if exist else crash
-                Serial.printf("bat0 mac %s\n",doc["bat0_mac"].as<const char*>());
-                Serial.printf("bat0 en %s\n",doc["bat0_en"].as<const char*>());
+                for(int i=0;i<BMS_MAX_DEVS;i++){
+                    if(doc["batteries"][i]["address"] && doc["batteries"][i]["enabled"]){
+                        
+                        if(is_valid_mac_address(doc["batteries"][i]["address"])){
+                            daly_bms_devices[i].address=NimBLEAddress(doc["batteries"][i]["address"].as<const char*>() ,BLE_ADDR_RANDOM);
+                            daly_bms_devices[i].enabled=doc["batteries"][i]["enabled"] | false;
+                        }else{
+                            daly_bms_devices[i].enabled=false;
+                        }
+                    }
+                }
+                
+                if(doc["controller"]["serial"] && doc["controller"]["enabled"]){
+                    String no=doc["controller"]["serial"];
+                    strncpy(fardriver_controller_device.true_model_no,no.c_str(),no.length()+1);
+                    fardriver_controller_device.enabled=doc["controller"]["enabled"] | false;
+                }
+
               //Handling function implementation
               savePersistentToNVS();
           }
@@ -577,6 +629,7 @@ void setup_webserver_websocket(){
 
 void loadPersistentFromNVS(){
     odometer=persistentData.getULong64("odometer");
+    trip_start=persistentData.getULong64("trip_start");
 
     wifi_private_password = persistentData.getString("wifi_private_password");
     wifi_private_ssid = persistentData.getString("wifi_private_ssid");
@@ -615,6 +668,7 @@ void initPersistent(){
         persistentData.putString("wifi_ap_ssid","My BTM Wildfire");
 
         persistentData.putString("ctrl_model_no", "");
+        persistentData.putString("ctrl_bt_name","");
         persistentData.putBool("ctrl_enabled", false);
         for(int i=0;i<BMS_MAX_DEVS;i++){
             String akey="bat";
