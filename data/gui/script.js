@@ -24,8 +24,23 @@ async function getData() {
     }
   }
 
-
+async function loadicon(icon){
+    try {
+        const response = await fetch("./res/"+icon);
+        if (!response.ok) {
+          throw new Error(`Response status: ${response.status}`);
+        }
+    
+        console.log(response)
+        
+      } catch (error) {
+        console.log("errorli");
+        console.log(error);
+      }
+}
 function onload(event) {
+    
+    loadicon("bt2.svg");
     speedmeter('sspeedcircle',270,7);
     speedmeter('spowercircle',240,8);
     speedmeter('sbattery0circle',240,11);
@@ -128,15 +143,15 @@ function updateE(id,val){
 
 function updateGUI(){
     let d=data;
-    updateE("v_engine_t",d.controller.engine_temp);
-    updateE("v_ctrl_t",d.controller.engine_temp);
+    updateE("v_engine_t",d["controller"]["engine_temp"]);
+    //updateE("v_ctrl_t",d.controller.engine_temp);
 
-    updateE("v_gear",d.controller.gear);
+    updateE("v_gear",d["controller"]["gear"]);
 
-    updateE("v_speed",d.controller.cur_speed_kmh);
-    speedmeter('speedcircle',Math.min(150,d.controller.cur_speed_kmh)*270/150,7);
+    updateE("v_speed",d["controller"]["cur_speed_kmh"]);
+    speedmeter('speedcircle',Math.min(150,d["controller"]["cur_speed_kmh"])*270/150,7);
 
-    let cpower=((d.batteries[0].volt_tot_mv/1000*d.batteries[0].current_ma/1000+d.batteries[1].volt_tot_mv/1000*d.batteries[1].current_ma/1000)/1000).toFixed(1);
+    let cpower=((d["batteries"][0]["volt_tot_mv"]/1000*d["batteries"][0]["current_ma"]/1000+d["batteries"][1]["volt_tot_mv"]/1000*d["batteries"][1]["current_ma"]/1000)/1000).toFixed(1);
     updateE("v_cur_power",cpower);
     if(cpower>=0){
         speedmeter('powercircle',(cpower/35)*120,12);
@@ -145,20 +160,20 @@ function updateGUI(){
         speedmeter('powercircle',(cpower/10)*120,12);
     }
 
-    updateE("v_odo",d.other.odometer);
-    updateE("v_trip",d.other.trip);
-    updateE("v_range",d.range);
+    updateE("v_odo",d["other"]["odometer"]);
+    updateE("v_trip",d["other"]["trip"]);
+    updateE("v_range",d["other"]["range"]);
 
-    updateE("v_bat0_soc",(d.batteries[0].soc_perm/10).toFixed(1)); 
-    speedmeter('battery0circle',d.batteries[0].soc_perm*240/1000,11);
-    updateE("v_bat0_v",(d.batteries[0].volt_tot_mv/1000).toFixed(1));
-    updateE("v_bat0_min_t",d.batteries[0].lowest_temp);
-    updateE("v_bat0_max_t",d.batteries[0].highest_temp);
+    updateE("v_bat0_soc",(d["batteries"][0]["soc_perm"]/10).toFixed(1)); 
+    speedmeter('battery0circle',d["batteries"][0]["soc_perm"]*240/1000,11);
+    updateE("v_bat0_v",(d["batteries"][0]["volt_tot_mv"]/1000).toFixed(1));
+    updateE("v_bat0_min_t","XX"+d["batteries"][0]["lowest_temp"]);
+    updateE("v_bat0_max_t",d["batteries"][0]["highest_temp"]);
     
 
-    updateE("v_bat1_soc",(d.batteries[1].soc_perm/10).toFixed(1)); 
+    updateE("v_bat1_soc",(d["batteries"][1]["soc_perm"]/10).toFixed(1)); 
     speedmeter('battery1circle',d.batteries[1].soc_perm*240/1000,11);
-    updateE("v_bat1_v",(d.batteries[1].volt_tot_mv/1000).toFixed(1));
+    updateE("v_bat1_v",(d["batteries"][1]["volt_tot_mv"]/1000).toFixed(1));
     updateE("v_bat1_min_t",d.batteries[1].lowest_temp);
     updateE("v_bat1_max_t",d.batteries[1].highest_temp);
     
@@ -176,10 +191,13 @@ function onMessage(event) {
     keys=d.ptr.split("/");
     //remove starting slash
     keys.splice(0,1);
+    console.log(keys)
+    tmp=data
     for(i=0;i<keys.length-1;i++){
-        tmp=d[keys[i]]
+        tmp=tmp[keys[i]]
     }
-    tmp[keys[keys.length-2]]=d.val;
+    console.log("VAL 2 b replaced"+tmp[keys[keys.length-2]])
+    tmp[keys[keys.length-1]]=d["val"];
     updateGUI();
    // parseData();
 }

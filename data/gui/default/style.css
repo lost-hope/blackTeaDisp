@@ -149,6 +149,10 @@ background-image:  repeating-radial-gradient( circle at 0 0, transparent 0, #202
     filter: brightness(20%);
 }
 
+ #rect *{
+    fill:red
+}
+
 #leftpanel{
     display: flex;
     flex: 1 0 170px;

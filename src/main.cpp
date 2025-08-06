@@ -14,6 +14,9 @@
 #define BT_DALY_CMD_PARAMS 0x50
 
 #define IGNORE_LIST_SIZE 20
+#define BT_CONN_TIMEOUT 1000
+#define BT_SCAN_TIMEOUT 1000
+
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
@@ -123,7 +126,7 @@ struct FarDriverControllerDevice{
     NimBLEAddress wrong_addresses[IGNORE_LIST_SIZE];
     uint8_t wa_index=0;
     unsigned long last_subscription=0;
-    unsigned long last_scan=0;
+    unsigned long last_try_connect=0;
 
     CtrlData data;
 };
@@ -153,29 +156,47 @@ void ws_send(JsonDocument& doc) {
     ws.textAll(buffer);
 }
 
+template <typename T>void ws_send_single( T val, String jsonpointer){
+    JsonDocument doc;
+    doc["ptr"]=jsonpointer;
+    doc["val"]=val;
+    ws_send(doc);
+}
+
 /**
  * @param path is of rfc6901 json pointer format
  */
 template <typename T> void set_single(T* store, T val, String jsonpointer){
-    Serial.printf("Sending value for %s\n",jsonpointer.c_str());
     if((*store)!=val){
-        JsonDocument doc;
+        Serial.printf("Sending value for %s\n",jsonpointer.c_str());
         (*store)=val;
-        doc["ptr"]=jsonpointer;
-        doc["val"]=val;
-        ws_send(doc);
+        ws_send_single<T>(val,jsonpointer);
     }
 }
 
-
+void send_client_cstatus(NimBLEClient* pClient,bool connected){
+    if(pClient==fardriver_controller_device.client){
+        ws_send_single<bool>(connected,"/controller/connected");
+    }else{
+        for(int i=0;i<BMS_MAX_DEVS;i++){
+            if(daly_bms_devices[i].client==pClient){
+                ws_send_single<bool>(connected,"/batteries/"+String(i)+"/connected");
+                break;
+            }
+        }
+    }
+}
 
 class ClientCallbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pClient) override {
         Serial.printf("Connected to: %s\n", pClient->getPeerAddress().toString().c_str());
+        send_client_cstatus(pClient,true);
+        
     }
 
     void onDisconnect(NimBLEClient* pClient, int reason) override {
         Serial.printf("%s Disconnected, reason = %d \n", pClient->getPeerAddress().toString().c_str(), reason);
+        send_client_cstatus(pClient,false);
     }
 } clientCallbacks;
 
@@ -739,6 +760,7 @@ void setup() {
         DalyBmsDevice* d=&daly_bms_devices[i];
         Serial.printf("Try to create bms-client for '%s' to %s\n",d->name.c_str(),d->address.toString().c_str());
         d->client=NimBLEDevice::createClient(d->address);
+        d->client->setConnectTimeout(BT_CONN_TIMEOUT);
         if(!d->client){
             Serial.printf("Error creating client for bms %u\n",i);
         }
@@ -747,6 +769,7 @@ void setup() {
     }
 
     fardriver_controller_device.client=NimBLEDevice::createClient();
+    fardriver_controller_device.client->setConnectTimeout(BT_CONN_TIMEOUT);
 
 }
 
@@ -757,19 +780,15 @@ void connect_daly_bms(){
         
         
         if(d->enabled && !d->client->isConnected()){
-            if(millis()-d->last_try_connect<10*1000){
+            if(millis()-d->last_try_connect<3*BT_CONN_TIMEOUT){
                 continue;
             }
             d->last_try_connect=millis();
             Serial.printf("Connect for BMS %u @ %u\n",i,millis());
             d->client->setClientCallbacks(&clientCallbacks, false);
             Serial.printf("trying to connect to bms %u : %s\n",i, d->client->getPeerAddress().toString().c_str());
-            if(!d->client->connect(true, true, false)){
-                Serial.printf("Failed to connect bms-client\n");
-                continue;
-            }else{
-                Serial.printf("Connected to bms-client %u\n",i);
-            }
+            
+            d->client->connect(true, true, false);
             //TODO: BUG: async call returns asap...retvalues have no meaning if connected or not!
             
         }
@@ -786,11 +805,11 @@ bool is_ignored(const NimBLEAdvertisedDevice* dev){
 }
 
 void connect_fardriver_controller(){
-    if(!fardriver_controller_device.client->isConnected() && millis()-fardriver_controller_device.last_scan>10000){
-        fardriver_controller_device.last_scan=millis();
+    if(!fardriver_controller_device.client->isConnected() && millis()-fardriver_controller_device.last_try_connect>2*(BT_CONN_TIMEOUT+BT_SCAN_TIMEOUT)){
+        fardriver_controller_device.last_try_connect=millis();
         NimBLEScan *pScan = NimBLEDevice::getScan();
         //TODO: Async?
-        NimBLEScanResults results = pScan->getResults(1 * 1000);
+        NimBLEScanResults results = pScan->getResults(BT_SCAN_TIMEOUT);
         for (int i = 0; i < results.getCount(); i++) {
             const NimBLEAdvertisedDevice *device = results.getDevice(i);
                     
@@ -806,10 +825,7 @@ void connect_fardriver_controller(){
             }
             fardriver_controller_device.verified=0;
             fardriver_controller_device.client->setClientCallbacks(&clientCallbacks, false);
-            if(!fardriver_controller_device.client->connect(device->getAddress(),true, true, false)){
-                Serial.printf("Failed to connect controller-client\n");
-                return;
-            }
+            fardriver_controller_device.client->connect(device->getAddress(), true, true, false);
             
             
             break;
