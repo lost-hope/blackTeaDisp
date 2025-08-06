@@ -17,6 +17,10 @@
 #define BT_CONN_TIMEOUT 1000
 #define BT_SCAN_TIMEOUT 1000
 
+#define BMS_MAX_DEVS 2
+
+DalyBmsDevice daly_bms_devices[BMS_MAX_DEVS];
+FarDriverControllerDevice fardriver_controller_device;
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
