@@ -6,6 +6,7 @@
 #include <ESPAsyncWebServer.h>
 #include "LittleFS.h"
 #include <regex.h>
+#include "nvs_flash.h"
 
 #define BT_DALY_CMD_SOC  0x90
 #define BT_DALY_CMD_VRANGE 0x91
@@ -82,8 +83,9 @@ struct BmsData{
 struct DalyBmsDevice{
     const String name;
     NimBLEClient* client;
-    bool enabled=true;
+    bool enabled=false;
 
+    unsigned long last_try_connect=0;
     unsigned long slow_refresh_int_ms=60*1000;
     unsigned long last_slow_refresh_ms=0;
     unsigned long refresh_int_ms=2000;
@@ -100,6 +102,7 @@ uint64_t odometer;
 uint64_t odometer_last_store;
 bool odometer_inited=false;
 uint64_t odometer_last_raw;
+uint16_t range=0;
 
 
 String wifi_ap_ssid;
@@ -108,12 +111,12 @@ String wifi_private_ssid;
 String wifi_private_password;
 
 struct FarDriverControllerDevice{
-    const String name;
+    String name;
     NimBLEClient* client;
-    bool enabled=true;
+    bool enabled=false;
 
     uint8_t verified=0;
-    const String bt_name;
+    String bt_name;
     //the internal id  (e.g. JSWX....... ) of the controller; used instead of dynamic mac to identify this exact controller!
     char true_model_no[21];
    
@@ -154,6 +157,7 @@ void ws_send(JsonDocument& doc) {
  * @param path is of rfc6901 json pointer format
  */
 template <typename T> void set_single(T* store, T val, String jsonpointer){
+    Serial.printf("Sending value for %s\n",jsonpointer.c_str());
     if((*store)!=val){
         JsonDocument doc;
         (*store)=val;
@@ -171,7 +175,7 @@ class ClientCallbacks : public NimBLEClientCallbacks {
     }
 
     void onDisconnect(NimBLEClient* pClient, int reason) override {
-        Serial.printf("%s Disconnected, reason = %d - Starting scan\n", pClient->getPeerAddress().toString().c_str(), reason);
+        Serial.printf("%s Disconnected, reason = %d \n", pClient->getPeerAddress().toString().c_str(), reason);
     }
 } clientCallbacks;
 
@@ -328,33 +332,33 @@ void notifycb_bms_daly(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_
         Serial.printf("unknown notification source");
         return;
     }
-    JsonDocument doc;
     
     if(pData[2]==BT_DALY_CMD_SOC){
-        set_single<uint16_t>(&bd->soc_perm,(uint16_t)((pData[10] &0xFF)<<8 | pData[11]),String("/batteries/"+bms_i)+"/soc_perm");
-        set_single<int64_t>(&bd->current_ma,((int64_t)((pData[8] &0xFF)<<8 | pData[9])-30000)*100,String("/batteries/"+bms_i)+"/current_ma");
-        set_single<uint32_t>(&bd->volt_tot_mv,(uint32_t)((pData[4] &0xFF)<<8 | pData[5])*100,String("/batteries/"+bms_i)+"/volt_tot_mv");
-        Serial.printf("SoC: %.1f %%, V_tot: %.1f V, current: %.1f A\n",bd->soc_perm/10.0,bd->volt_tot_mv/1000.0,bd->current_ma/1000.0);
+        set_single<uint16_t>(&bd->soc_perm,(uint16_t)((pData[10] &0xFF)<<8 | pData[11]),"/batteries/"+String(bms_i)+"/soc_perm");
+        set_single<int64_t>(&bd->current_ma,((int64_t)((pData[8] &0xFF)<<8 | pData[9])-30000)*100,"/batteries/"+String(bms_i)+"/current_ma");
+        set_single<uint32_t>(&bd->volt_tot_mv,(uint32_t)((pData[4] &0xFF)<<8 | pData[5])*100,"/batteries/"+String(bms_i)+"/volt_tot_mv");
+        //Serial.printf("SoC: %.1f %%, V_tot: %.1f V, current: %.1f A\n",bd->soc_perm/10.0,bd->volt_tot_mv/1000.0,bd->current_ma/1000.0);
     }else if(pData[2]==BT_DALY_CMD_TRANGE){
 
         //        set_single<uint32_t>(sto,val,String("/batteries/"+bms_i)+"/volt_tot_mv");
 
-        set_single<int16_t>(&bd->highest_temp,pData[4] -40,String("/batteries/"+bms_i)+"/highest_temp");
-        set_single<uint8_t>(&bd->highest_temp_cell,pData[5],String("/batteries/"+bms_i)+"/highest_temp_cell");
-        set_single<int16_t>(&bd->lowest_temp,pData[6] -40,String("/batteries/"+bms_i)+"/lowest_temp");
-        set_single<uint8_t>(&bd->lowest_temp_cell,pData[7],String("/batteries/"+bms_i)+"/lowest_temp_cell");
+        set_single<int16_t>(&bd->highest_temp,pData[4] -40,"/batteries/"+String(bms_i)+"/highest_temp");
+        set_single<uint8_t>(&bd->highest_temp_cell,pData[5],"/batteries/"+String(bms_i)+"/highest_temp_cell");
+        set_single<int16_t>(&bd->lowest_temp,pData[6] -40,"/batteries/"+String(bms_i)+"/lowest_temp");
+        set_single<uint8_t>(&bd->lowest_temp_cell,pData[7],"/batteries/"+String(bms_i)+"/lowest_temp_cell");
 
-        Serial.printf("highT(no. %u): %i °C, lowT(no. %u): %i °C\n", bd->highest_temp_cell,bd->highest_temp, bd->lowest_temp_cell,bd->lowest_temp);
+
+        //Serial.printf("highT(no. %u): %i °C, lowT(no. %u): %i °C\n", bd->highest_temp_cell,bd->highest_temp, bd->lowest_temp_cell,bd->lowest_temp);
     }else if(pData[2]==BT_DALY_CMD_VRANGE){
-        set_single<uint16_t>(&bd->highest_v_mv,(uint16_t)((pData[4] &0xFF)<<8 | pData[5]),String("/batteries/"+bms_i)+"/highest_v_mv");
-        set_single<uint8_t>(&bd->highest_v_cell,pData[6],String("/batteries/"+bms_i)+"/highest_v_cell");
-        set_single<uint16_t>(&bd->lowest_v_mv,(uint16_t)((pData[7] &0xFF)<<8 | pData[8]),String("/batteries/"+bms_i)+"/lowest_v_mv");
-        set_single<uint8_t>(&bd->lowest_v_cell,pData[9],String("/batteries/"+bms_i)+"/lowest_v_cell");
+        set_single<uint16_t>(&bd->highest_v_mv,(uint16_t)((pData[4] &0xFF)<<8 | pData[5]),"/batteries/"+String(bms_i)+"/highest_v_mv");
+        set_single<uint8_t>(&bd->highest_v_cell,pData[6],"/batteries/"+String(bms_i)+"/highest_v_cell");
+        set_single<uint16_t>(&bd->lowest_v_mv,(uint16_t)((pData[7] &0xFF)<<8 | pData[8]),"/batteries/"+String(bms_i)+"/lowest_v_mv");
+        set_single<uint8_t>(&bd->lowest_v_cell,pData[9],"/batteries/"+String(bms_i)+"/lowest_v_cell");
 
         Serial.printf("highV(no. %u): %i °mV, lowV(no. %u): %i mV\n", bd->highest_v_cell,bd->highest_v_mv, bd->lowest_v_cell,bd->lowest_v_mv);
     }else if(pData[2]==BT_DALY_CMD_PARAMS){
         //example: A501 5008 0000 C350 00000E102F
-        set_single<uint32_t>(&bd->capacity_mah,(uint32_t)((pData[4]<<24) | (pData[5] <<16) |(pData[6]<<8) | pData[7]),String("/batteries/"+bms_i)+"/capacity_mah");
+        set_single<uint32_t>(&bd->capacity_mah,(uint32_t)((pData[4]<<24) | (pData[5] <<16) |(pData[6]<<8) | pData[7]),"/batteries/"+String(bms_i)+"/capacity_mah");
     }else{
         Serial.printf("-> Notify from BMS\n");
         debug_notify(pRemoteCharacteristic, pData, length, isNotify);
@@ -362,21 +366,31 @@ void notifycb_bms_daly(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_
     }
 
     // send ws-notify 
-    ws_send(doc);
+    //ws_send(doc);
     //alldata_doc["batteries"][bms_i]=doc["batteries"][bms_i];
 }
 
 bool query_fardriver_controller(){
     const NimBLEUUID svc_uuid("0000ffe0-0000-1000-8000-00805f9b34fb");
-    if(!fardriver_controller_device.client->isConnected()){
+    if(!fardriver_controller_device.enabled || !fardriver_controller_device.client->isConnected()){
         return false;
     }
+
+    //renew subscription every 1-2s as a keepalive as the controller stops sending data after about 2.5s
+    if(millis()-fardriver_controller_device.last_subscription<=1800){
+          return false;  
+    }
+    Serial.printf("renew notify for controller\n");
+    fardriver_controller_device.last_subscription=millis();
+            
     //Serial.printf("uuid: %s\n",svc_uuid.toString().c_str());
     
     NimBLERemoteService* rsvc = fardriver_controller_device.client->getService(svc_uuid);
      
     if(rsvc==NULL){
-       Serial.printf("Svc invalid\n");
+       Serial.printf("FD Svc invalid\n");
+       //TODO: here the service is not availbale altough we are connected; this means we possibly
+       //have connected to a wrong device and should disconnect and put the device on ignore
        return false;
     }
 
@@ -404,7 +418,7 @@ bool query_daly_bms(){
         NimBLERemoteService* rsvc =d->client->getService(svc_uuid);
      
         if(rsvc==NULL){
-            Serial.printf("Svc invalid\n");
+            Serial.printf("Daly Svc invalid\n");
             continue;
         }
         rsvc->getCharacteristic(NimBLEUUID("0000fff1-0000-1000-8000-00805f9b34fb"))->subscribe(true,notifycb_bms_daly,true);
@@ -474,6 +488,8 @@ void savePersistentToNVS(){
 
     persistentData.putBool("ctrl_enabled", fardriver_controller_device.enabled);
     persistentData.putString("ctrl_model_no",fardriver_controller_device.true_model_no);
+    persistentData.putString("ctrl_bt_name",fardriver_controller_device.bt_name);
+
 
     for(int i=0;i<BMS_MAX_DEVS;i++){
         String akey="bat";
@@ -485,7 +501,7 @@ void savePersistentToNVS(){
         persistentData.putString(akey.c_str(),daly_bms_devices[i].address.toString().c_str());
         persistentData.putBool(ekey.c_str(),daly_bms_devices[i].enabled);
     }
-
+    Serial.printf("Data stored to NVS successfully!\n");
 }
 
 void setup_webserver_websocket(){
@@ -538,6 +554,7 @@ void setup_webserver_websocket(){
         //other and calculated values
 
         alldata_doc["other"]["odometer"]=odometer;
+        alldata_doc["other"]["range"]=range;
         alldata_doc["other"]["trip"]=odometer-trip_start;
 
 
@@ -563,14 +580,15 @@ void setup_webserver_websocket(){
 
         root["wifi_private_password"] = wifi_private_password;
         root["wifi_private_ssid"] = wifi_private_ssid;
-    
+        
         root["wifi_ap_password"] = wifi_ap_password;
         root["wifi_ap_ssid"] = wifi_ap_ssid;
 
         root["odometer"] = odometer;
 
         root["ctrl_serial"] = fardriver_controller_device.true_model_no;
-        root["ctrl_enabled"] = true;
+        root["ctrl_bt_name"] = fardriver_controller_device.bt_name;
+        root["ctrl_enabled"] = fardriver_controller_device.enabled;
 
         JsonArray arr = root["batteries"].to<JsonArray>();
         for(int i=0;i<BMS_MAX_DEVS;i++){
@@ -578,7 +596,7 @@ void setup_webserver_websocket(){
             arr[i]["enabled"] = daly_bms_devices[i].enabled;
         }
 
-
+        serializeJson(root,Serial);
         serializeJson(root, *response);
         Serial.println();
         request->send(response);
@@ -607,15 +625,18 @@ void setup_webserver_websocket(){
                         }
                     }
                 }
-                
-                if(doc["controller"]["serial"] && doc["controller"]["enabled"]){
-                    String no=doc["controller"]["serial"];
+                String no=doc["controller"]["serial"];
+                    Serial.printf("New serial: %s\n",no.c_str());
+                if(doc["controller"]["serial"] != nullptr && doc["controller"]["enabled"] != nullptr){
+                    
                     strncpy(fardriver_controller_device.true_model_no,no.c_str(),no.length()+1);
                     fardriver_controller_device.enabled=doc["controller"]["enabled"] | false;
                 }
-
+                fardriver_controller_device.bt_name=doc["controller"]["bt_name"].as<String>();
+                Serial.printf("saving btname %s",fardriver_controller_device.bt_name.c_str());
               //Handling function implementation
               savePersistentToNVS();
+              request->send(200, "application/json", "updated");
           }
     );
 
@@ -631,13 +652,15 @@ void loadPersistentFromNVS(){
     odometer=persistentData.getULong64("odometer");
     trip_start=persistentData.getULong64("trip_start");
 
-    wifi_private_password = persistentData.getString("wifi_private_password");
-    wifi_private_ssid = persistentData.getString("wifi_private_ssid");
+    wifi_private_password = persistentData.getString("wifi_prv_pw");
+    wifi_private_ssid = persistentData.getString("wifi_prv_ssid");
 
-    wifi_ap_password = persistentData.getString("wifi_ap_password");
+    wifi_ap_password = persistentData.getString("wifi_ap_pw");
     wifi_ap_ssid = persistentData.getString("wifi_ap_ssid");
 
     fardriver_controller_device.enabled=persistentData.getBool("ctrl_enabled");
+    fardriver_controller_device.bt_name=persistentData.getString("ctrl_bt_name");
+    Serial.printf("loaded val: %s",fardriver_controller_device.bt_name.c_str());
     const char* m=persistentData.getString("ctrl_model_no").c_str();
     strncpy(fardriver_controller_device.true_model_no,m,21);
 
@@ -655,20 +678,22 @@ void loadPersistentFromNVS(){
 }
 
 void initPersistent(){
+    //nvs_flash_erase();nvs_flash_init();
     persistentData.begin("persistentData", false);   
     // open (or create and then open if it does not yet exist) in RW mode.
-    if (persistentData.isKey("odo") == false) {
+    if (persistentData.isKey("odometer") == false) {
         //init values
+        Serial.printf("No pers. data found, initializing\n");
         persistentData.putULong64("odometer", 0);
 
-        persistentData.putString("wifi_private_password","");
-        persistentData.putString("wifi_private_ssid","");
+        persistentData.putString("wifi_prv_pw","");
+        persistentData.putString("wifi_prv_ssid","");
     
-        persistentData.putString("wifi_ap_password","123456");
+        persistentData.putString("wifi_ap_pw","abcdef123456");
         persistentData.putString("wifi_ap_ssid","My BTM Wildfire");
 
-        persistentData.putString("ctrl_model_no", "");
-        persistentData.putString("ctrl_bt_name","");
+        persistentData.putString("ctrl_model_no", "JSW....");
+        persistentData.putString("ctrl_bt_name","YuanQuFOC866");
         persistentData.putBool("ctrl_enabled", false);
         for(int i=0;i<BMS_MAX_DEVS;i++){
             String akey="bat";
@@ -679,6 +704,8 @@ void initPersistent(){
             persistentData.putString(akey.c_str(), "");
             persistentData.putBool(ekey.c_str() ,false);
         }
+    }else{
+        Serial.printf("Pers. data found, using it!\n");
     }
         
     loadPersistentFromNVS();
@@ -730,12 +757,20 @@ void connect_daly_bms(){
         
         
         if(d->enabled && !d->client->isConnected()){
+            if(millis()-d->last_try_connect<10*1000){
+                continue;
+            }
+            d->last_try_connect=millis();
+            Serial.printf("Connect for BMS %u @ %u\n",i,millis());
             d->client->setClientCallbacks(&clientCallbacks, false);
             Serial.printf("trying to connect to bms %u : %s\n",i, d->client->getPeerAddress().toString().c_str());
             if(!d->client->connect(true, true, false)){
                 Serial.printf("Failed to connect bms-client\n");
                 continue;
+            }else{
+                Serial.printf("Connected to bms-client %u\n",i);
             }
+            //TODO: BUG: async call returns asap...retvalues have no meaning if connected or not!
             
         }
     }
@@ -759,9 +794,11 @@ void connect_fardriver_controller(){
         for (int i = 0; i < results.getCount(); i++) {
             const NimBLEAdvertisedDevice *device = results.getDevice(i);
                     
+            Serial.printf("Searching for FD Device with name '%s'\n",fardriver_controller_device.bt_name.c_str());
             if(strcmp(fardriver_controller_device.bt_name.c_str(),device->getName().c_str())!=0){
                 continue;
             }
+            Serial.printf("Found FD device with name '%s' and address '%s', try to connect\n",device->getName().c_str(),device->getAddress().toString().c_str());
             //fardriver_controller_device.address=device->getAddress();
             //TODO: check if address was not falsified before and is on ignorelist
             if(is_ignored(device)){
@@ -781,12 +818,7 @@ void connect_fardriver_controller(){
         }
     }
 
-    //renew subscription every 1-2s as a keepalive as the controller stops sending data after about 2.5s
-    if(millis()-fardriver_controller_device.last_subscription>1800){
-        Serial.printf("renew notify for controller\n");
-        fardriver_controller_device.last_subscription=millis();
-        query_fardriver_controller();
-    }
+
 
 }
 
@@ -806,9 +838,9 @@ void loop() {
     //TODO: reconnect wifi-client if private wifi available
 
 
-    if(millis()-wstesttime>500){
-        wstesttime=millis();
-        ws.textAll(String("{ \"time\": "+String(wstesttime)+"}"));
-    }
+    // if(millis()-wstesttime>500){
+    //     wstesttime=millis();
+    //     ws.textAll(String("{ \"time\": "+String(wstesttime)+"}"));
+    // }
     ws.cleanupClients();
  }

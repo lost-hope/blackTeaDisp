@@ -61,20 +61,20 @@
                 </tr>
                 <tr>
                     <td>
-                        <label for="bat0_mac">BMS 0 mac-address:</label>
+                        <label for="bat0_address">BMS 0 mac-address:</label>
                     </td>
                     <td>
-                        <input type="text" id="bat0_mac" name="bat0_mac" pattern="([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}">            
+                        <input type="text" id="bat0_address" name="bat0_address" pattern="([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}">            
                         <label for="bat0_en">enabled?</label>
                         <input type="checkbox" id="bat0_en" name="bat0_en">
                     </td>
                 </tr>
                 <tr class="ends">
                     <td>
-                        <label for="bat1_mac">BMS 1 mac-address:</label>
+                        <label for="bat1_address">BMS 1 mac-address:</label>
                     </td>
                     <td>
-                        <input type="text" id="bat1_mac" name="bat1_mac">
+                        <input type="text" id="bat1_address" name="bat1_address">
                         <label for="bat1_en">enabled?</label>
                         <input type="checkbox" id="bat1_en" name="bat1_en">
                     </td>
@@ -91,11 +91,11 @@
                 </tr>
                 <tr>
                     <td>
-                        <label for="ctrl_name">Bluetooth name of Fardriver Controller:</label>
+                        <label for="ctrl_bt_name">Bluetooth name of Fardriver Controller:</label>
                     </td>
-                    </tr>
-                        <input type="text" id="ctrl_name" name="ctrl_name" value="">
                     <td>
+                        <input type="text" id="ctrl_bt_name" name="ctrl_bt_name" value="">
+                    </td>
                 </tr>
                 <tr>
                     <td colspan=2><button type="button" id="sendbutton" onClick="sendData()">save</button></td>
@@ -104,6 +104,7 @@
         </form>
         <script>
             var base_url = `http://${window.location.hostname}`;
+            console.log(base_url);
             //base_url ="http://192.168.11.85/";
 
             function onload(){
@@ -115,13 +116,19 @@
 
                     console.log(d)
 
-                    document.querySelector("#odometer").checked=d.odometer;
+                    document.querySelector("#odometer").value=d.odometer;
+
+                    document.querySelector("#wifi_ap_ssid").value=d.wifi_ap_ssid;
+                    document.querySelector("#wifi_ap_password").value=d.wifi_ap_password;
+
+                    document.querySelector("#wifi_private_ssid").value=d.wifi_private_ssid;
+                    document.querySelector("#wifi_private_password").value=d.wifi_private_password;
 
                     document.querySelector("#ctrl_serial").value=d.ctrl_serial;
                     document.querySelector("#ctrl_bt_name").value=d.ctrl_bt_name;
                     document.querySelector("#ctrl_en").checked=d.ctrl_enabled;
                     for(i=0;i<d.batteries.length;i++){
-                        document.querySelector("#bat"+i+"_mac").value=d.batteries[i].mac;
+                        document.querySelector("#bat"+i+"_address").value=d.batteries[i].address;
                         document.querySelector("#bat"+i+"_en").checked=d.batteries[i].enabled;
                     }
                 });
@@ -133,19 +140,26 @@
                 data = Object.fromEntries(formData)
                 console.log(data)
                 var jdata={}
+
+                jdata["wifi_ap_ssid"]=data["wifi_ap_ssid"];
+                jdata["wifi_ap_password"]=data["wifi_ap_password"];
+
+                jdata["wifi_private_ssid"]=data["wifi_private_ssid"];
+                jdata["wifi_private_password"]=data["wifi_private_password"];
+
                 jdata.batteries=[];
                 for(i=0;i<2;i++){
-                    jdata.batteries[i]={}
-                    jdata.batteries[i].address=data["bat"+i+"_mac"]
+                    jdata["batteries"][i]={}
+                    jdata["batteries"][i].address=data["bat"+i+"_address"]
                     if(data["bat"+i+"_en"] == undefined){
                         jdata["batteries"][i].enabled = false 
                     }else{
                         jdata["batteries"][i].enabled = true 
                     }
                 }
-                jdata.controller={}
-                jdata.controller.serial=data.ctrl_serial;
-                jdata.controller.bt_name=data.ctrl_bt_name;
+                jdata["controller"]={}
+                jdata["controller"]["serial"]=data["ctrl_serial"];
+                jdata["controller"]["bt_name"]=data["ctrl_bt_name"];
                 if(data["ctrl_en"] == undefined){
                         jdata["controller"].enabled = false 
                     }else{
@@ -164,7 +178,7 @@
                 });
             }
             
-            //window.addEventListener('load', onload);
+            window.addEventListener('load', onload);
             
             
         </script>

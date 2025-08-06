@@ -129,7 +129,7 @@ function updateE(id,val){
 function updateGUI(){
     let d=data;
     updateE("v_engine_t",d.controller.engine_temp);
-    updateE("v_ctrl_t",d.engine_temp);
+    updateE("v_ctrl_t",d.controller.engine_temp);
 
     updateE("v_gear",d.controller.gear);
 
@@ -145,8 +145,8 @@ function updateGUI(){
         speedmeter('powercircle',(cpower/10)*120,12);
     }
 
-    updateE("v_odo",d.odometer);
-    updateE("v_trip",d.trip);
+    updateE("v_odo",d.other.odometer);
+    updateE("v_trip",d.other.trip);
     updateE("v_range",d.range);
 
     updateE("v_bat0_soc",(d.batteries[0].soc_perm/10).toFixed(1)); 
