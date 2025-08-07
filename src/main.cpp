@@ -19,8 +19,7 @@
 
 #define BMS_MAX_DEVS 2
 
-DalyBmsDevice daly_bms_devices[BMS_MAX_DEVS];
-FarDriverControllerDevice fardriver_controller_device;
+
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
@@ -101,10 +100,13 @@ struct DalyBmsDevice{
     unsigned long last_fast_refresh_ms=0;
     NimBLEAddress address;
 
+    uint32_t nom_voltage_mv=103600;
     BmsData data;
 };
 
 uint64_t trip_start;
+uint64_t trip_consumed_wh=0;
+uint64_t last_soc_wh=0;
 uint64_t odometer;
 uint64_t odometer_last_store;
 bool odometer_inited=false;
@@ -136,7 +138,8 @@ struct FarDriverControllerDevice{
 };
 
 
-#include "config.h"
+DalyBmsDevice daly_bms_devices[BMS_MAX_DEVS];
+FarDriverControllerDevice fardriver_controller_device;
 
 bool is_valid_mac_address(String fs){
     if(fs==NULL){
@@ -255,6 +258,18 @@ void verify_model_no(NimBLERemoteCharacteristic* pRemoteCharacteristic,uint8_t* 
     }
 }
 
+
+uint64_t get_total_soc_wh(){
+    uint64_t overall_cap_wh=0;
+    for(int i=0;i<BMS_MAX_DEVS;i++){
+        DalyBmsDevice* bd=&daly_bms_devices[i];
+        if(bd->enabled && bd->client->isConnected()){
+            overall_cap_wh+= bd->data.capacity_mah/1000.0 * bd->nom_voltage_mv/1000.0 * bd->data.soc_perm/1000.0;
+        }
+    }
+    return overall_cap_wh;
+}
+
 void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
     //Serial.printf("-> Notify from Controller\n");
     // credits to: https://github.com/jackhumbert/fardriver-controllers/blob/main/fardriver.hpp 
@@ -300,8 +315,13 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
             set_single<bool>(&cd->sliding_backwards,(bool)(pData[2] & 0x10),"/controller/sliding_backwards");
 
             if(cd->motion && !(bool)(pData[2] & 0x20)){
-                //bike has stopped, backup/store odometer
+                //bike has stopped motion, backup/store odometer
                 persistentData.putULong64("odometer", odometer);
+                persistentData.putULong64("trip_wh", trip_consumed_wh);
+            }
+            if(!cd->motion && (bool)(pData[2] & 0x20)){
+                //bike has started motion, backup/store odometer
+                last_soc_wh=get_total_soc_wh();
             }
 
             set_single<bool>(&cd->motion,(bool)(pData[2] & 0x20),"/controller/motion");
@@ -318,8 +338,13 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
             //not look temperaturish. Maybe the mos-temp is only uint8_t in [12]?
             set_single<int16_t>(&cd->controller_temp,(int16_t)(pData[12]),"/controller/engine_temp");
         }else if(pData[1]==0x94){   //matches 0x69 !!!!
-            set_single<uint64_t>(&cd->odometer_raw,(uint16_t)((pData[11] &0xFF)<<8 | pData[10]),"/controller/odo_raw");
             odometer_last_raw=cd->odometer_raw;
+            set_single<uint64_t>(&cd->odometer_raw,(uint16_t)((pData[11] &0xFF)<<8 | pData[10]),"/controller/odo_raw");
+            
+            if(cd->odometer_raw-odometer_last_raw>=1){
+                trip_consumed_wh+=(get_total_soc_wh()-last_soc_wh);
+                last_soc_wh=get_total_soc_wh();
+            }
             
             if(!odometer_inited){
                 odometer_inited=true;
@@ -331,7 +356,14 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
             if(odometer-odometer_last_store>50){
                 odometer_last_store=odometer;
                 persistentData.putULong64("odometer", odometer);
+                persistentData.putULong64("trip_wh", trip_consumed_wh);
+
+
+                //(get_total_soc_wh()-soc_at_motion_start_wh)
             }
+
+            //every 100m update used energy
+
 
         }else{
             //return to prevent empty ws-messages
@@ -510,6 +542,7 @@ void initWiFi(){
 void savePersistentToNVS(){
     persistentData.putULong64("odometer", odometer);
     persistentData.putULong64("trip_start", trip_start);
+    persistentData.putULong64("trip_wh", trip_consumed_wh);
 
     persistentData.putBool("ctrl_enabled", fardriver_controller_device.enabled);
     persistentData.putString("ctrl_model_no",fardriver_controller_device.true_model_no);
@@ -581,6 +614,7 @@ void setup_webserver_websocket(){
         alldata_doc["other"]["odometer"]=odometer;
         alldata_doc["other"]["range"]=range;
         alldata_doc["other"]["trip"]=odometer-trip_start;
+        alldata_doc["other"]["trip_consumed_wh"]=trip_consumed_wh;
 
 
 
@@ -596,7 +630,13 @@ void setup_webserver_websocket(){
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
         //request->send(LittleFS, "/gui/default/index.html", "text/html");
         request->redirect("gui/default/index.html");
-      });
+    });
+
+    server.on("/reset_trip", HTTP_GET, [](AsyncWebServerRequest *request) {
+        set_single<uint64_t>(&trip_start,odometer,"/other/trip_start");
+        set_single<uint64_t>(&trip_consumed_wh,0,"/other/trip_consumed_wh");
+        savePersistentToNVS();
+    });
 
     server.on("/get_config", HTTP_GET, [](AsyncWebServerRequest *request) {
         AsyncResponseStream *response = request->beginResponseStream("application/json");
@@ -652,11 +692,11 @@ void setup_webserver_websocket(){
                 }
                 String no=doc["controller"]["serial"];
                     Serial.printf("New serial: %s\n",no.c_str());
-                if(doc["controller"]["serial"] != nullptr && doc["controller"]["enabled"] != nullptr){
+                //if(doc["controller"]["serial"] != nullptr && doc["controller"]["enabled"] != nullptr){
                     
                     strncpy(fardriver_controller_device.true_model_no,no.c_str(),no.length()+1);
                     fardriver_controller_device.enabled=doc["controller"]["enabled"] | false;
-                }
+                //}
                 fardriver_controller_device.bt_name=doc["controller"]["bt_name"].as<String>();
                 Serial.printf("saving btname %s",fardriver_controller_device.bt_name.c_str());
               //Handling function implementation
@@ -676,6 +716,7 @@ void setup_webserver_websocket(){
 void loadPersistentFromNVS(){
     odometer=persistentData.getULong64("odometer");
     trip_start=persistentData.getULong64("trip_start");
+    trip_consumed_wh=persistentData.getULong64("trip_wh");
 
     wifi_private_password = persistentData.getString("wifi_prv_pw");
     wifi_private_ssid = persistentData.getString("wifi_prv_ssid");
@@ -710,6 +751,9 @@ void initPersistent(){
         //init values
         Serial.printf("No pers. data found, initializing\n");
         persistentData.putULong64("odometer", 0);
+        persistentData.putULong64("trip_start", 0);
+        persistentData.putULong64("trip_wh", 0);
+
 
         persistentData.putString("wifi_prv_pw","");
         persistentData.putString("wifi_prv_ssid","");

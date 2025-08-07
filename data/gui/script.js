@@ -146,7 +146,21 @@ function updateGUI(){
     updateE("v_engine_t",d["controller"]["engine_temp"]);
     //updateE("v_ctrl_t",d.controller.engine_temp);
 
-    updateE("v_gear",d["controller"]["gear"]);
+    
+    let lbl="--";
+    if(d["controller"]["brake_switch"]!= undefined && d["controller"]["gear"] != undefined){
+        if(d["controller"]["brake_switch"]==false){
+            if(d["controller"]["gear"]==1){
+                lbl="ECO";
+            }else if(d["controller"]["gear"]==2){
+                lbl="NORMAL";
+            }else if(d["controller"]["gear"]==3){
+                lbl="SPORT";
+            }
+        }
+    }
+    updateE("v_gear",lbl);
+
 
     updateE("v_speed",d["controller"]["cur_speed_kmh"]);
     speedmeter('speedcircle',Math.min(150,d["controller"]["cur_speed_kmh"])*270/150,7);
@@ -164,21 +178,29 @@ function updateGUI(){
     updateE("v_trip",d["other"]["trip"]);
     updateE("v_range",d["other"]["range"]);
 
-    updateE("v_bat0_soc",(d["batteries"][0]["soc_perm"]/10).toFixed(1)); 
-    speedmeter('battery0circle',d["batteries"][0]["soc_perm"]*240/1000,11);
-    updateE("v_bat0_v",(d["batteries"][0]["volt_tot_mv"]/1000).toFixed(1));
-    updateE("v_bat0_min_t","XX"+d["batteries"][0]["lowest_temp"]);
-    updateE("v_bat0_max_t",d["batteries"][0]["highest_temp"]);
-    
+    let soc_tot=0.0;
+    let bat_tot=0;
+    if(d["batteries"][0]["enabled"]){
+        updateE("v_bat0_soc",(d["batteries"][0]["soc_perm"]/10).toFixed(1)); 
+        soc_tot+=d["batteries"][0]["soc_perm"]/10;
+        bat_tot+=1;
+        speedmeter('battery0circle',d["batteries"][0]["soc_perm"]*240/1000,11);
+        updateE("v_bat0_v",(d["batteries"][0]["volt_tot_mv"]/1000).toFixed(1));
+        updateE("v_bat0_min_t",d["batteries"][0]["lowest_temp"]);
+        updateE("v_bat0_max_t",d["batteries"][0]["highest_temp"]);
+    }
 
-    updateE("v_bat1_soc",(d["batteries"][1]["soc_perm"]/10).toFixed(1)); 
-    speedmeter('battery1circle',d.batteries[1].soc_perm*240/1000,11);
-    updateE("v_bat1_v",(d["batteries"][1]["volt_tot_mv"]/1000).toFixed(1));
-    updateE("v_bat1_min_t",d.batteries[1].lowest_temp);
-    updateE("v_bat1_max_t",d.batteries[1].highest_temp);
-    
+    if(d["batteries"][0]["enabled"]){
+        updateE("v_bat1_soc",(d["batteries"][1]["soc_perm"]/10).toFixed(1)); 
+        soc_tot+=d["batteries"][1]["soc_perm"]/10;
+        bat_tot+=1;
+        speedmeter('battery1circle',d["batteries"][1]["soc_perm"]*240/1000,11);
+        updateE("v_bat1_v",(d["batteries"][1]["volt_tot_mv"]/1000).toFixed(1));
+        updateE("v_bat1_min_t",d["batteries"][1]["lowest_temp"]);
+        updateE("v_bat1_max_t",d["batteries"][1]["highest_temp"]);
+    }
 
-    updateE("v_bat_soc",(d.batteries[0].soc_perm/20+d.batteries[1].soc_perm/20).toFixed(1)); 
+    updateE("v_bat_soc",(soc_tot/bat_tot).toFixed(1)); 
 
 
 
