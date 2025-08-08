@@ -20,11 +20,11 @@ and the fardriver-motorcontroller and presents them on a slim wifi-webserver on 
 
 
 # Planned Features
-- [:hourglass:] support for second battery (should be working already but couldnt be tested due to lack of 2nd battery atm)
+- [ ] :hourglass: support for second battery (should be working already but couldnt be tested due to lack of 2nd battery atm)
 - [ ] more Datapoints and stats
-- [:hourglass:] non-retard gui
+- [ ] :hourglass: non-retard gui
 - [ ] only send values via ws if they have changed (-> performance)
-- [:hourglass:] allow to set/store the configuration via webinterface (-> generic builds & flash-script can be published, ease of use)
+- [ ] :hourglass:allow to set/store the configuration via webinterface (-> generic builds & flash-script can be published, ease of use)
 - [ ] installscript!
 - [ ] AVAS/Engine-Sound via i2s to notify pedestrians and to signal that bike is on (-> prevent unwanted pull on gas)
 - [ ] build an y-adaptercable, to get indicator, headlight & speedometer-signals to be shown on screen
