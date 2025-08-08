@@ -86,27 +86,40 @@ struct BmsData{
     uint8_t lowest_v_cell;
 };
 
+struct BtCommand{
+    const char cmd[13];
+    unsigned long last_sent;
+    uint32_t refresh_ms;
+};
+
 struct DalyBmsDevice{
     const String name;
     NimBLEClient* client;
     bool enabled=false;
 
     unsigned long last_try_connect=0;
-    unsigned long slow_refresh_int_ms=60*1000;
-    unsigned long last_slow_refresh_ms=0;
-    unsigned long refresh_int_ms=2000;
-    unsigned long last_refresh_ms=0;
-    unsigned long fast_refresh_int_ms=200;
-    unsigned long last_fast_refresh_ms=0;
+    // unsigned long slow_refresh_int_ms=60*1000;
+    // unsigned long last_slow_refresh_ms=0;
+    // unsigned long refresh_int_ms=2000;
+    // unsigned long last_refresh_ms=0;
+    // unsigned long fast_refresh_int_ms=200;
+    // unsigned long last_fast_refresh_ms=0;
     NimBLEAddress address;
 
+    BtCommand cmds[4]={
+        {.cmd={0xa5,0x80,BT_DALY_CMD_SOC,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbd},.last_sent=0,.refresh_ms=200},
+        {.cmd={0xa5,0x80,BT_DALY_CMD_VRANGE,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbe},.last_sent=0,.refresh_ms=200},
+        {.cmd={0xa5,0x80,BT_DALY_CMD_TRANGE,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbf},.last_sent=0,.refresh_ms=2*1000},
+        {.cmd={0xa5,0x80,BT_DALY_CMD_PARAMS,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x7d},.last_sent=0,.refresh_ms=60*1000}
+    };
+    bool ready_flag=true;
     uint32_t nom_voltage_mv=103600;
     BmsData data;
 };
 
 uint64_t trip_start;
 uint64_t trip_consumed_wh=0;
-uint32_t avg_consumption_wh=0;
+uint32_t avg_consumption_whkm=0;
 uint64_t last_soc_wh=0;
 uint64_t odometer;
 uint64_t odometer_last_store;
@@ -379,10 +392,19 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
             set_single<uint64_t>(&cd->odometer_raw,(uint16_t)((pData[11] &0xFF)<<8 | pData[10]),"/controller/odo_raw");
             
             //every 100m update used energy
-            if(cd->odometer_raw-odometer_last_raw>=1){
+            if(cd->odometer_raw-odometer_last_raw >= 1){
                 trip_consumed_wh+=(get_total_soc_wh()-last_soc_wh);
                 last_soc_wh=get_total_soc_wh();
-                set_single<uint32_t>(&avg_consumption_wh,(trip_consumed_wh)/((odometer-trip_start)/1000.0),"/other/avg_consumption_wh");
+                
+                uint64_t val;
+                if(odometer-trip_start == 0){
+                    //division by zero
+                    val=0;
+                }else{
+                    //wh per km
+                    val=(trip_consumed_wh)/((odometer-trip_start)/10.0);
+                }
+                set_single<uint32_t>(&avg_consumption_whkm,val,"/other/avg_consumption_whkm");
             }
             
             if(!odometer_inited){
@@ -392,7 +414,7 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
             }
             //TODO: make odo and trip persist on specific criteria. 
             //Idea: every 5 Kilometers and once as /controller/motion goes from true->false
-            if(odometer-odometer_last_store>50){
+            if(odometer-odometer_last_store > 50){
                 odometer_last_store=odometer;
                 persistentData.putULong64("odometer", odometer);
                 persistentData.putULong64("trip_wh", trip_consumed_wh);
@@ -461,6 +483,8 @@ void notifycb_bms_daly(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_
         return;
     }
 
+    daly_bms_devices[bms_i].ready_flag=true;
+    
     // send ws-notify 
     //ws_send(doc);
     //alldata_doc["batteries"][bms_i]=doc["batteries"][bms_i];
@@ -520,47 +544,70 @@ bool query_daly_bms(){
         rsvc->getCharacteristic(NimBLEUUID("0000fff1-0000-1000-8000-00805f9b34fb"))->subscribe(true,notifycb_bms_daly,true);
 
         //TODO: eliminate delay by millis()
-        //refresh values that change fast
-        if(millis()-d->last_fast_refresh_ms > d->fast_refresh_int_ms){
-            
-            d->last_fast_refresh_ms=millis();
-            
-            //soc,voltage,current
-            delay(20);
-            const char cmd1[13]={0xa5,0x80,BT_DALY_CMD_SOC,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbd};
-            rsvc->getCharacteristic(rch_uuid)->writeValue(cmd1,13);
-            
 
-            //voltage range
-            delay(20);
-            const char cmd3[13]={0xa5,0x80,BT_DALY_CMD_VRANGE,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbe};
-            rsvc->getCharacteristic(rch_uuid)->writeValue(cmd3,13);
-            
-
+        if(!d->ready_flag){
+            //if the previous request wasnt answered via notify yet
+            continue;
         }
 
-        //refresh values that only change seldom/slowly
-        if(millis()-d->last_refresh_ms > d->refresh_int_ms){
-            
-            d->last_refresh_ms=millis();
-            
-            //temp-range
-            delay(30);
-            const char cmd2[13]={0xa5,0x80,BT_DALY_CMD_TRANGE,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbf};
-            rsvc->getCharacteristic(rch_uuid)->writeValue(cmd2,13);
-            
+        unsigned long max_overdue=0;
+        int8_t max_overdue_j=-1;
+        for(int j=0;j<4;j++){
+            unsigned long diff=millis()-d->cmds[j].last_sent;
+            if( diff > d->cmds[j].refresh_ms && diff-d->cmds[j].refresh_ms > max_overdue){
+                max_overdue_j=j;
+                max_overdue=diff-d->cmds[j].refresh_ms;
+            }
         }
 
-        //refresh values that change almost never
-        if(millis()-d->last_slow_refresh_ms > d->slow_refresh_int_ms){
-            d->last_slow_refresh_ms=millis();
-
-            //params
-            delay(50);
-            const char cmd4[13]={0xa5,0x80,BT_DALY_CMD_PARAMS,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x7d};
-            rsvc->getCharacteristic(rch_uuid)->writeValue(cmd4,13);
-            
+        if(max_overdue_j >= 0){
+            rsvc->getCharacteristic(rch_uuid)->writeValue(d->cmds[max_overdue_j].cmd,13);
+            d->cmds[max_overdue_j].last_sent=millis();
+            d->ready_flag=false;
         }
+
+
+        // //refresh values that change fast
+        // if(millis()-d->last_fast_refresh_ms > d->fast_refresh_int_ms){
+            
+        //     d->last_fast_refresh_ms=millis();
+            
+        //     //soc,voltage,current
+        //     delay(20);
+        //     const char cmd1[13]={0xa5,0x80,BT_DALY_CMD_SOC,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbd};
+        //     rsvc->getCharacteristic(rch_uuid)->writeValue(cmd1,13);
+            
+
+        //     //voltage range
+        //     delay(20);
+        //     const char cmd3[13]={0xa5,0x80,BT_DALY_CMD_VRANGE,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbe};
+        //     rsvc->getCharacteristic(rch_uuid)->writeValue(cmd3,13);
+            
+
+        // }
+
+        // //refresh values that only change seldom/slowly
+        // if(millis()-d->last_refresh_ms > d->refresh_int_ms){
+            
+        //     d->last_refresh_ms=millis();
+            
+        //     //temp-range
+        //     delay(30);
+        //     const char cmd2[13]={0xa5,0x80,BT_DALY_CMD_TRANGE,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbf};
+        //     rsvc->getCharacteristic(rch_uuid)->writeValue(cmd2,13);
+            
+        // }
+
+        // //refresh values that change almost never
+        // if(millis()-d->last_slow_refresh_ms > d->slow_refresh_int_ms){
+        //     d->last_slow_refresh_ms=millis();
+
+        //     //params
+        //     delay(50);
+        //     const char cmd4[13]={0xa5,0x80,BT_DALY_CMD_PARAMS,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x7d};
+        //     rsvc->getCharacteristic(rch_uuid)->writeValue(cmd4,13);
+            
+        // }
     }
     return true;
 
@@ -602,7 +649,7 @@ void savePersistentToNVS(){
 
 void setup_webserver_websocket(){
     server.on("/json2", HTTP_GET, [](AsyncWebServerRequest *request) {
-
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
         for(int i=0;i<BMS_MAX_DEVS;i++){
             BmsData* bd=&daly_bms_devices[i].data;
             alldata_doc["batteries"][i]["enabled"]=daly_bms_devices[i].enabled;
@@ -653,14 +700,11 @@ void setup_webserver_websocket(){
         alldata_doc["other"]["range"]=range;
         alldata_doc["other"]["trip"]=odometer-trip_start;
         alldata_doc["other"]["trip_consumed_wh"]=trip_consumed_wh;
-        alldata_doc["other"]["avg_consumption_wh"]=avg_consumption_wh;
+        alldata_doc["other"]["avg_consumption_whkm"]=avg_consumption_whkm;
 
 
-
-
-        char json[2000];
-        serializeJsonPretty(alldata_doc, json);
-        request->send(200, "application/json", (const uint8_t *)json, strlen(json));
+        serializeJsonPretty(alldata_doc, *response);
+        request->send(response);
         //request->send(response);
     });
 
@@ -699,9 +743,8 @@ void setup_webserver_websocket(){
             arr[i]["enabled"] = daly_bms_devices[i].enabled;
         }
 
-        serializeJson(root,Serial);
+     //   serializeJson(root,Serial);
         serializeJson(root, *response);
-        Serial.println();
         request->send(response);
     });
 
@@ -745,6 +788,11 @@ void setup_webserver_websocket(){
 
     
     server.serveStatic("/gui", LittleFS, "/gui");
+    //server.serveStatic("/gui/default/index.html", LittleFS, "/gui/default/index.html");
+    //server.serveStatic("/gui/script.js", LittleFS, "/gui/script.js");
+    //server.serveStatic("/gui/default/res/logo.svg", LittleFS, "/gui/default/res/logo.svg");
+    //server.serveStatic("/gui/default/res/bt2.svg", LittleFS, "/gui/default/res/bt2.svg");
+    
     server.addHandler(&ws);
     server.begin();
 }
@@ -898,7 +946,7 @@ void connect_fardriver_controller(){
 int wstesttime=0;
 
 void loop() {
-
+    delay(5);
     //fardriver controller
     connect_fardriver_controller();
     query_fardriver_controller();

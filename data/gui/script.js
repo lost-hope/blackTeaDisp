@@ -202,7 +202,7 @@ function updateGUI(){
 
     updateE("v_bat_soc",(soc_tot/bat_tot).toFixed(1)); 
 
-
+    updateE("v_avg_energy",d["other"]["avg_consumption_whkm"])
 
 }
 
