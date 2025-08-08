@@ -14,7 +14,7 @@
 #define BT_DALY_CMD_PARAMS 0x50
 
 #define IGNORE_LIST_SIZE 20
-#define BT_CONN_TIMEOUT 1000
+#define BT_CONN_TIMEOUT 800
 #define BT_SCAN_TIMEOUT 1000
 
 #define BMS_MAX_DEVS 2
@@ -106,6 +106,7 @@ struct DalyBmsDevice{
 
 uint64_t trip_start;
 uint64_t trip_consumed_wh=0;
+uint32_t avg_consumption_wh=0;
 uint64_t last_soc_wh=0;
 uint64_t odometer;
 uint64_t odometer_last_store;
@@ -153,6 +154,15 @@ bool is_valid_mac_address(String fs){
     return true;
 }
 
+bool is_ignored(const NimBLEAdvertisedDevice* dev){
+    for(int i=0;i<IGNORE_LIST_SIZE;i++){
+        if(fardriver_controller_device.wrong_addresses[i].equals(dev->getAddress())){
+            return true;
+        }
+    }
+    return false;
+}
+
 void ws_send(JsonDocument& doc) {
     const size_t len = measureJson(doc);
   
@@ -175,7 +185,7 @@ template <typename T>void ws_send_single( T val, String jsonpointer){
  */
 template <typename T> void set_single(T* store, T val, String jsonpointer){
     if((*store)!=val){
-        Serial.printf("Sending value for %s\n",jsonpointer.c_str());
+        //Serial.printf("Sending value for %s\n",jsonpointer.c_str());
         (*store)=val;
         ws_send_single<T>(val,jsonpointer);
     }
@@ -206,6 +216,33 @@ class ClientCallbacks : public NimBLEClientCallbacks {
         send_client_cstatus(pClient,false);
     }
 } clientCallbacks;
+
+class ScanCallbacks : public NimBLEScanCallbacks {
+    void onResult(const NimBLEAdvertisedDevice* device) override {
+        Serial.printf("Advertised Device found: %s, looking for %s\n", device->toString().c_str(),fardriver_controller_device.bt_name.c_str());
+        if(strcmp(fardriver_controller_device.bt_name.c_str(),device->getName().c_str())!=0){
+            return;
+        }
+
+        //fardriver_controller_device.address=device->getAddress();
+        //TODO: check if address was not falsified before and is on ignorelist
+        if(is_ignored(device)){
+            return;
+        }
+
+        Serial.printf("Found not-ignored FD device with name '%s' and address '%s', stopping scan, trying to connect\n",device->getName().c_str(),device->getAddress().toString().c_str());
+
+        NimBLEDevice::getScan()->stop();
+        fardriver_controller_device.verified=0;
+        fardriver_controller_device.client->setClientCallbacks(&clientCallbacks, false);
+        fardriver_controller_device.client->connect(device->getAddress(), false, true, false);
+            
+    }
+
+    void onScanEnd(const NimBLEScanResults& results, int reason) override {
+        Serial.printf("Scan Ended\n");
+    }
+} scanCallbacks;
 
 
 int8_t get_bms_index_by_client(NimBLEClient* c){
@@ -305,7 +342,7 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
             set_single<uint16_t>(&cd->cur_rpm,(uint16_t)((pData[9] &0xFF)<<8 | pData[8]),"/controller/cur_rpm");
 
                                                   //rpm     2*pi*60min/(100000) *(gesamtradius                              -->)
-            set_single<uint16_t>(&cd->cur_rpm,cd->cur_rpm * (0.00376991136f * (cd->wheel_radius * 1270.f + cd->wheel_width * cd->wheel_ratio) / cd->rate_ratio),"/controller/cur_speed_kmh");
+            set_single<uint16_t>(&cd->cur_speed_kmh,cd->cur_rpm * (0.00376991136f * (cd->wheel_radius * 1270.f + cd->wheel_width * cd->wheel_ratio) / cd->rate_ratio),"/controller/cur_speed_kmh");
             //Serial.printf("wheelratio: %u, wheel_radius: %u, wheel_width: %u, rate_ratio: %u, rpm: %u\n",wheel_ratio,wheel_radius,wheel_width,rate_ratio,cur_rpm);
             //ws.textAll(String("{ \"speed\": "+String(alldata_doc["engine"]["cur_speed_kph"])+"}"));
 
@@ -341,9 +378,11 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
             odometer_last_raw=cd->odometer_raw;
             set_single<uint64_t>(&cd->odometer_raw,(uint16_t)((pData[11] &0xFF)<<8 | pData[10]),"/controller/odo_raw");
             
+            //every 100m update used energy
             if(cd->odometer_raw-odometer_last_raw>=1){
                 trip_consumed_wh+=(get_total_soc_wh()-last_soc_wh);
                 last_soc_wh=get_total_soc_wh();
+                set_single<uint32_t>(&avg_consumption_wh,(trip_consumed_wh)/((odometer-trip_start)/1000.0),"/other/avg_consumption_wh");
             }
             
             if(!odometer_inited){
@@ -362,7 +401,7 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
                 //(get_total_soc_wh()-soc_at_motion_start_wh)
             }
 
-            //every 100m update used energy
+            
 
 
         }else{
@@ -386,7 +425,7 @@ void notifycb_bms_daly(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_
     int bms_i=get_bms_index_by_client(pRemoteCharacteristic->getClient());
     BmsData* bd=&daly_bms_devices[bms_i].data;
     if(bms_i==-1){
-        Serial.printf("unknown notification source");
+        Serial.printf("unknown notification source\n");
         return;
     }
     
@@ -412,13 +451,13 @@ void notifycb_bms_daly(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_
         set_single<uint16_t>(&bd->lowest_v_mv,(uint16_t)((pData[7] &0xFF)<<8 | pData[8]),"/batteries/"+String(bms_i)+"/lowest_v_mv");
         set_single<uint8_t>(&bd->lowest_v_cell,pData[9],"/batteries/"+String(bms_i)+"/lowest_v_cell");
 
-        Serial.printf("highV(no. %u): %i °mV, lowV(no. %u): %i mV\n", bd->highest_v_cell,bd->highest_v_mv, bd->lowest_v_cell,bd->lowest_v_mv);
+        //Serial.printf("highV(no. %u): %i °mV, lowV(no. %u): %i mV\n", bd->highest_v_cell,bd->highest_v_mv, bd->lowest_v_cell,bd->lowest_v_mv);
     }else if(pData[2]==BT_DALY_CMD_PARAMS){
         //example: A501 5008 0000 C350 00000E102F
         set_single<uint32_t>(&bd->capacity_mah,(uint32_t)((pData[4]<<24) | (pData[5] <<16) |(pData[6]<<8) | pData[7]),"/batteries/"+String(bms_i)+"/capacity_mah");
     }else{
-        Serial.printf("-> Notify from BMS\n");
-        debug_notify(pRemoteCharacteristic, pData, length, isNotify);
+        Serial.printf("-> other notification from BMS %u\n",bms_i);
+        //debug_notify(pRemoteCharacteristic, pData, length, isNotify);
         return;
     }
 
@@ -437,7 +476,7 @@ bool query_fardriver_controller(){
     if(millis()-fardriver_controller_device.last_subscription<=1800){
           return false;  
     }
-    Serial.printf("renew notify for controller\n");
+    //Serial.printf("renew notify for controller\n");
     fardriver_controller_device.last_subscription=millis();
             
     //Serial.printf("uuid: %s\n",svc_uuid.toString().c_str());
@@ -475,15 +514,15 @@ bool query_daly_bms(){
         NimBLERemoteService* rsvc =d->client->getService(svc_uuid);
      
         if(rsvc==NULL){
-            Serial.printf("Daly Svc invalid\n");
+            Serial.printf("Daly Svc invalid, shouldnt happen - is %s wrong address?!\n",d->address.toString().c_str());
             continue;
         }
         rsvc->getCharacteristic(NimBLEUUID("0000fff1-0000-1000-8000-00805f9b34fb"))->subscribe(true,notifycb_bms_daly,true);
 
-
+        //TODO: eliminate delay by millis()
         //refresh values that change fast
         if(millis()-d->last_fast_refresh_ms > d->fast_refresh_int_ms){
-            Serial.printf("Query BMS '%s'\n",d->name.c_str());
+            
             d->last_fast_refresh_ms=millis();
             
             //soc,voltage,current
@@ -502,7 +541,7 @@ bool query_daly_bms(){
 
         //refresh values that only change seldom/slowly
         if(millis()-d->last_refresh_ms > d->refresh_int_ms){
-            Serial.printf("Query BMS '%s'\n",d->name.c_str());
+            
             d->last_refresh_ms=millis();
             
             //temp-range
@@ -514,7 +553,6 @@ bool query_daly_bms(){
 
         //refresh values that change almost never
         if(millis()-d->last_slow_refresh_ms > d->slow_refresh_int_ms){
-            Serial.printf("Query BMS '%s'\n",d->name.c_str());
             d->last_slow_refresh_ms=millis();
 
             //params
@@ -615,7 +653,7 @@ void setup_webserver_websocket(){
         alldata_doc["other"]["range"]=range;
         alldata_doc["other"]["trip"]=odometer-trip_start;
         alldata_doc["other"]["trip_consumed_wh"]=trip_consumed_wh;
-
+        alldata_doc["other"]["avg_consumption_wh"]=avg_consumption_wh;
 
 
 
@@ -836,60 +874,30 @@ void connect_daly_bms(){
             d->client->setClientCallbacks(&clientCallbacks, false);
             Serial.printf("trying to connect to bms %u : %s\n",i, d->client->getPeerAddress().toString().c_str());
             
-            d->client->connect(true, true, false);
+            d->client->connect(false, true, false);
             //TODO: BUG: async call returns asap...retvalues have no meaning if connected or not!
             
         }
     }
 }
 
-bool is_ignored(const NimBLEAdvertisedDevice* dev){
-    for(int i=0;i<IGNORE_LIST_SIZE;i++){
-        if(fardriver_controller_device.wrong_addresses[i].equals(dev->getAddress())){
-            return true;
-        }
-    }
-    return false;
-}
+
 
 void connect_fardriver_controller(){
     if(!fardriver_controller_device.client->isConnected() && millis()-fardriver_controller_device.last_try_connect>2*(BT_CONN_TIMEOUT+BT_SCAN_TIMEOUT)){
         fardriver_controller_device.last_try_connect=millis();
         NimBLEScan *pScan = NimBLEDevice::getScan();
-        //TODO: Async?
-        NimBLEScanResults results = pScan->getResults(BT_SCAN_TIMEOUT);
-        for (int i = 0; i < results.getCount(); i++) {
-            const NimBLEAdvertisedDevice *device = results.getDevice(i);
-                    
-            Serial.printf("Searching for FD Device with name '%s'\n",fardriver_controller_device.bt_name.c_str());
-            if(strcmp(fardriver_controller_device.bt_name.c_str(),device->getName().c_str())!=0){
-                continue;
-            }
-            Serial.printf("Found FD device with name '%s' and address '%s', try to connect\n",device->getName().c_str(),device->getAddress().toString().c_str());
-            //fardriver_controller_device.address=device->getAddress();
-            //TODO: check if address was not falsified before and is on ignorelist
-            if(is_ignored(device)){
-                continue;
-            }
-            fardriver_controller_device.verified=0;
-            fardriver_controller_device.client->setClientCallbacks(&clientCallbacks, false);
-            fardriver_controller_device.client->connect(device->getAddress(), true, true, false);
-            
-            
-            break;
-                    
-
-        }
+        pScan->setScanCallbacks(&scanCallbacks, false); // Set the callback for when devices are discovered, no duplicates.
+        pScan->setActiveScan(false);            // Set passive scanning, less info but faster
+        pScan->setMaxResults(0);               // Do not store the scan results, use callback only.
+        pScan->start(BT_SCAN_TIMEOUT, false, true); // duration, not a continuation of last scan, restart to get all devices again.
     }
-
-
 
 }
 
 int wstesttime=0;
 
 void loop() {
-    delay(10);
 
     //fardriver controller
     connect_fardriver_controller();
