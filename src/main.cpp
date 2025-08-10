@@ -345,12 +345,8 @@ void notifycb_controller_fardriver(NimBLERemoteCharacteristic* pRemoteCharacteri
             set_single<uint16_t>(&cd->avg_speed_kmh,pData[8],"/controller/avg_speed_kmh");
             set_single<uint8_t>(&cd->wheel_width,pData[9],"/controller/wheel_width");
             
-           //is not 4 or 4000 as expected, but 40975 - maybe that means sth. different or just need to be divided by 10?
-           //changing the val in the app changes this value:
-           // 1: 59935, 4: 40975, 5: 34835, 6: 28695, 8: 16415
-           // rate_ratio=(uint16_t)((pData[10] &0xFF)<<8 | pData[11]) ;
+           cd->rate_ratio=(uint16_t)((pData[11] &0xFF)<<8 | pData[10]) ;
             
-           cd->rate_ratio =4000; //override for now
         }else if(pData[1]==0xb0){   //matches 0xe2 !!!!
             set_single<uint16_t>(&cd->cur_rpm,(uint16_t)((pData[9] &0xFF)<<8 | pData[8]),"/controller/cur_rpm");
 
