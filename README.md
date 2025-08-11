@@ -6,16 +6,16 @@ and the fardriver-motorcontroller and presents them on a slim wifi-webserver on 
 # Installation & Configuration
 - Install VSCode / OSS and the platform.io Extension
 - Clone/Download the Repository which contains the OSS project folder
-- Open the projectfolder in VSCode ~~and edit the parameters in the `config.h` file~~ can now be done via webui
-   - Note that for the DalyBMS you have to specify its mac_address but for the fardriver controller you have to give its Modelnumber instead,
-     which you find in the fardriver-App, having 20 letters/numbers, starting with JSWX....
-   - ~~Also edit `BMS_MAX_DEVS` to match the number of batteries you want to monitor~~ is set to 2, but you can disable them via webui
+- Open the projectfolder in VSCode can now be done via webui
 - Connect your ESP32 Board to your pc and go to the `pioarduino` Tab (Microchip-Symbol in the leftside toolbar in VSCode)
   - Build & upload the software by clicking `Upload` in the List in the left sidebar-panel
   - Also transfer the webserver-files for the gui by clicking `Upload Filesystem Image` in the List in the left sidebar-panel
 - The ESP32 should restart (if not, remove/reattach its power to manually restart) and on your Phone you should see The wifi BTM Wildfire to which you can connect
-  with your password set in `config.h`.
-- Visit (http://192.168.4.1) to open the beautiful designed GUI, which might be further improved later ;)
+  with the default password  `abcdef123456`.
+- Visit (http://192.168.4.1/gui/config.html) to configure the Display
+  - Note that for the DalyBMS you have to specify its mac_address but for the fardriver controller you have to give its Modelnumber instead, which you find in the fardriver-App, having 20 letters/numbers, starting with JSWX.... 
+  - Make sure to set the enabled checkbox for the devices you want to use
+- Visit (http://192.168.4.1) to see the UI
 - After a few seconds you should see some data appear, e.g. battery-soc, driving-mode and so on
 
 
