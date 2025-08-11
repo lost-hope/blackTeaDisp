@@ -6,7 +6,7 @@ and the fardriver-motorcontroller and presents them on a slim wifi-webserver on 
 # Installation & Configuration
 - Install VSCode / OSS and the platform.io Extension
 - Clone/Download the Repository which contains the OSS project folder
-- Open the projectfolder in VSCode can now be done via webui
+- Open the projectfolder in VSCode
 - Connect your ESP32 Board to your pc and go to the `pioarduino` Tab (Microchip-Symbol in the leftside toolbar in VSCode)
   - Build & upload the software by clicking `Upload` in the List in the left sidebar-panel
   - Also transfer the webserver-files for the gui by clicking `Upload Filesystem Image` in the List in the left sidebar-panel
