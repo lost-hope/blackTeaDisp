@@ -24,23 +24,67 @@ async function getData() {
     }
   }
 
-async function loadicon(icon){
+async function loadicon(icon,id){
     try {
         const response = await fetch("./res/"+icon);
         if (!response.ok) {
           throw new Error(`Response status: ${response.status}`);
         }
-    
-        console.log(response)
+        let s=await response.text()
+        for(i=0;i<id.length;i++){
+            document.getElementById(id[i]).innerHTML=s
+        }
         
       } catch (error) {
         console.log("errorli");
         console.log(error);
       }
 }
+
+var isFS=false;
+var tick=0;
+
+/* When the openFullscreen() function is executed, open the video in fullscreen.
+Note that we must include prefixes for different browsers, as they don't support the requestFullscreen method yet */
+function toggleFullscreen() {
+  
+  if(isFS==true){
+    if (document.exitFullscreen) {
+        document.exitFullscreen();
+    }else if (document.msExitFullscreen) {
+        document.msExitFullscreen();
+    }else if (document.mozCancelFullScreen) {
+        document.mozCancelFullScreen();
+    }else if (document.webkitCancelFullScreen) {
+        document.webkitCancelFullScreen();
+    }
+    isFS=false;
+  }else{
+    var elem = document.documentElement;
+    if (elem.requestFullscreen) {
+        elem.requestFullscreen();
+      } else if (elem.webkitRequestFullscreen) { /* Safari */
+        elem.webkitRequestFullscreen();
+      } else if (elem.msRequestFullscreen) { /* IE11 */
+        elem.msRequestFullscreen();
+      }
+    isFS=true;
+  }
+}
+
 function onload(event) {
     
-    loadicon("bt2.svg");
+    loadicon("bat0.svg",["bat0tico_t","bat0tico_v"]);
+    loadicon("bat1.svg",["bat1tico_t","bat1tico_v"]);
+    loadicon("chip.svg",["ico_ctrl_t"]);
+    loadicon("ev_engine.svg",["ico_engine_t","warn_engine"]);
+    loadicon("temp.svg",["warn_temp"]);
+    loadicon("chip.svg",["ico_ctrl_t"]);
+    loadicon("bt3.svg",["warn_bt"]);
+    loadicon("indicator.svg",["leftIndicator","rightIndicator"]);
+    loadicon("charger.svg",["warn_charger"]);
+    loadicon("highbeam.svg",["warn_highbeam"]);
+
     speedmeter('sspeedcircle',270,7);
     speedmeter('spowercircle',240,8);
     speedmeter('sbattery0circle',240,11);
@@ -49,12 +93,77 @@ function onload(event) {
     getData();
     initWebSocket();
     ftime();
+
+    document.getElementById("btwflogo").addEventListener("click", toggleFullscreen);
+
+    setInterval(function() {
+        if(tick==0){
+            tick=1;
+            document.getElementById("v_bat0_min_t").style.display='none';
+            document.getElementById("v_bat0_max_t").style.display='inline';
+            document.getElementById("v_bat0_minmax_t").innerHTML='&#x25B4;';
+
+            document.getElementById("v_bat1_min_t").style.display='none';
+            document.getElementById("v_bat1_max_t").style.display='inline';
+            document.getElementById("v_bat1_minmax_t").innerHTML='&#x25B4;';
+            
+        }else{
+            tick=0;
+            document.getElementById("v_bat0_min_t").style.display='inline';
+            document.getElementById("v_bat0_max_t").style.display='none';
+            document.getElementById("v_bat0_minmax_t").innerHTML='&#x25BE;'
+
+            document.getElementById("v_bat1_min_t").style.display='inline';
+            document.getElementById("v_bat1_max_t").style.display='none';
+            document.getElementById("v_bat1_minmax_t").innerHTML='&#x25BE;'
+        }
+        
+    }, 3000);
+
     
 }
 
 //function getReadings(){
 //    websocket.send("getReadings");
 //}
+
+function setBtIndicator(id,e,c){
+    let t=document.querySelector("g#"+id+">text");
+    let i=document.querySelector("g#"+id+">rect");
+
+    let grp=document.getElementById(id);
+    if(e){
+        if(c){
+            i.style.opacity="1.0";
+            t.style.opacity="1.0";
+            i.style.animation="none";
+        }else{
+            i.style.animation="pulse-animation 2s infinite";
+            t.style.opacity="1.0";
+        }
+
+    }else{
+        i.style.opacity="0.0";
+        t.style.opacity="0.0";
+        i.style.animation="none";
+    }
+
+
+}
+
+function setBtLogo(ctrle,ctrlc,bms0e,bms0c,bms1e,bms1c){
+    setBtIndicator("svg_btbms0",bms0e,bms0c);
+    setBtIndicator("svg_btbms1",bms1e,bms1c);
+    setBtIndicator("svg_btctrl",ctrle,ctrlc);
+
+    if(bms0e && !bms0c ||bms1e && !bms1c ||ctrle && !ctrlc){
+        document.getElementById("warn_bt").classList.add("bright");
+    }else{
+        // darken
+        document.getElementById("warn_bt").classList.remove("bright");
+    }
+}
+
 
 function initWebSocket() {
     console.log('Trying to open a WebSocket connection…');
@@ -80,68 +189,74 @@ function onClose(event) {
 bat0_soc=0;
 bat1_soc=0;
 
-function parseData(myObj){
+// function parseData(myObj){
 
-    let bat0=((myObj || {}).batteries || {})[0];
-    if(bat0!=undefined){
+//     let bat0=((myObj || {}).batteries || {})[0];
+//     if(bat0!=undefined){
 
-        if(bat0.soc_perm != undefined){
-            bat0_soc=bat0.soc_perm/10.0;
-            document.getElementById("bat0_soc").innerHTML = bat0_soc;
-            document.getElementById("soc").innerHTML = (bat0_soc+bat1_soc)/2;
-        }
+//         if(bat0.soc_perm != undefined){
+//             bat0_soc=bat0.soc_perm/10.0;
+//             document.getElementById("bat0_soc").innerHTML = bat0_soc;
+//             document.getElementById("soc").innerHTML = (bat0_soc+bat1_soc)/2;
+//         }
 
-        if(bat0.current_ma != undefined){
-         //   document.getElementById("xxxx").innerHTML = bat0.current_ma/1000.0;
-        }
+//         if(bat0.current_ma != undefined){
+//          //   document.getElementById("xxxx").innerHTML = bat0.current_ma/1000.0;
+//         }
 
-        if(bat0.volt_tot_mv != undefined){
-            document.getElementById("bat0_volt").innerHTML = bat0.volt_tot_mv/1000.0;
-        }
+//         if(bat0.enabled != undefined){
+//             document.getElementById("bat0_temp").innerHTML = bat0.highest_temp;
+//         }
 
-        if(bat0.highest_temp != undefined){
-            document.getElementById("bat0_temp").innerHTML = bat0.highest_temp;
-        }
-    }
+//         if(bat0.volt_tot_mv != undefined){
+//             document.getElementById("bat0_volt").innerHTML = bat0.volt_tot_mv/1000.0;
+//         }
 
-    let ctrl=(myObj || {}).controller;
-    if(ctrl!=undefined){
-        //{"controller":{"cur_speed_kph":0,"brake_switch":false,"gear":1,"sliding_backwards":false,"motion":false}}
-        if(ctrl.cur_speed_kmh != undefined){
-            document.getElementById("speedometer").innerHTML = ctrl.cur_speed_kmh;
-            speedmeter((ctrl.cur_speed_kmh/150)*270.0)
-        }
-        if(ctrl.brake_switch != undefined && ctrl.gear != undefined){
-            let lbl="-";
-            if(ctrl.brake_switch==false){
-                if(ctrl.gear==1){
-                    lbl="ECO";
-                }else if(ctrl.gear==2){
-                    lbl="NORMAL";
-                }else if(ctrl.gear==3){
-                    lbl="SPORT";
-                }
-            }
-            document.getElementById("mode").innerHTML = lbl;
-        }
-        if(ctrl.engine_temp != undefined){
-            document.getElementById("engine_temp").innerHTML = ctrl.engine_temp;
-        }
-        if(ctrl.controller_temp != undefined){
-            document.getElementById("controller_temp").innerHTML = ctrl.controller_temp;
-        }
-    }
- /*   for (var i = 0; i < keys.length; i++){
-        var key = keys[i];
-        document.getElementById(key).innerHTML = myObj[key];
-    }*/
-}
+//         if(bat0.highest_temp != undefined){
+//             document.getElementById("bat0_temp").innerHTML = bat0.highest_temp;
+//         }
+//     }
+
+//     let ctrl=(myObj || {}).controller;
+//     if(ctrl!=undefined){
+//         //{"controller":{"cur_speed_kph":0,"brake_switch":false,"gear":1,"sliding_backwards":false,"motion":false}}
+//         if(ctrl.cur_speed_kmh != undefined){
+//             document.getElementById("speedometer").innerHTML = ctrl.cur_speed_kmh;
+//             speedmeter((ctrl.cur_speed_kmh/150)*270.0)
+//         }
+//         if(ctrl.brake_switch != undefined && ctrl.gear != undefined){
+//             let lbl="-";
+//             if(ctrl.brake_switch==false){
+//                 if(ctrl.gear==1){
+//                     lbl="ECO";
+//                 }else if(ctrl.gear==2){
+//                     lbl="NORMAL";
+//                 }else if(ctrl.gear==3){
+//                     lbl="SPORT";
+//                 }
+//             }
+//             document.getElementById("mode").innerHTML = lbl;
+//         }
+//         if(ctrl.engine_temp != undefined){
+//             document.getElementById("engine_temp").innerHTML = ctrl.engine_temp;
+//         }
+//         if(ctrl.controller_temp != undefined){
+//             document.getElementById("controller_temp").innerHTML = ctrl.controller_temp;
+//         }
+//     }
+//  /*   for (var i = 0; i < keys.length; i++){
+//         var key = keys[i];
+//         document.getElementById(key).innerHTML = myObj[key];
+//     }*/
+// }
 
 function updateE(id,val){
     document.getElementById(id).innerHTML = val;
 }
 
 function updateGUI(){
+
+    setBtLogo(true,false,true,true,true,true);
     let d=data;
     updateE("v_engine_t",d["controller"]["engine_temp"]);
     //updateE("v_ctrl_t",d.controller.engine_temp);
@@ -191,6 +306,8 @@ function updateGUI(){
     }
 
     if(d["batteries"][0]["enabled"]){
+        //document.getElementById("#btbms0_ind"). = val;
+
         updateE("v_bat1_soc",(d["batteries"][1]["soc_perm"]/10).toFixed(1)); 
         soc_tot+=d["batteries"][1]["soc_perm"]/10;
         bat_tot+=1;

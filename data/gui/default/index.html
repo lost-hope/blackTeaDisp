@@ -163,30 +163,28 @@
                           </svg>
                     </div>
                     <div>
-                        <img src="res/logo.svg" style="width:95%">
+                        <img id="btwflogo" src="res/logo.svg" style="width:95%">
                     </div>
                     <div>
                         <table class="datatab">
 
                             <tr>
                                 <td class="ico">
-                                    <svg height="20.117928" width="17.793407" ><use href="#icon-bat0" /></svg>
+                                    <span id="bat0tico_t"></span>
+                                </td><td class="val">
+                                    <span id="v_bat0_minmax_t"></span><span id="v_bat0_min_t">33</span><span id="v_bat0_max_t">55</span> &#176;C
                                 </td>
-                                <td class="val" colspan=3>
-                                    <span id="v_bat0_min_t"></span> - <span id="v_bat0_max_t"></span>  &#176;C
-                                </td>
-                            </tr>
-                            <tr>
                                 <td class="ico">
-                                    <svg height="20.005831" width="17.793407"><use href="#icon-bat1" /></svg>
+                                    <span id="bat1tico_t"></span>
+                                </td><td class="val">
+                                    <span id="v_bat1_minmax_t"></span><span id="v_bat1_min_t">33</span><span id="v_bat1_max_t">55</span> &#176;C
                                 </td>
-                                <td class="val" colspan=3>
-                                    <span id="v_bat1_min_t"></span> - <span id="v_bat1_max_t"></span> &#176;C
-                                </td>
-                            </tr>                            
+                            </tr>                       
                             <tr>
-                                <td class="ico"><svg width="19.064243" height="18.025478"><use href="#icon-engine" /></svg></td><td class="val"><span id="v_engine_t"></span> &#176;C</td>
-                                <td class="ico"><svg width="18" height="18"><use href="#icon-chip" /></svg></td><td class="val"><span id="v_ctrl_t"></span> &#176;C</td>
+                                <td class="ico"><span id="ico_engine_t"></span></td>
+                                <td class="val"><span id="v_engine_t"></span> &#176;C</td>
+                                <td class="ico"><span id="ico_ctrl_t"></span></td>
+                                <td class="val"><span id="v_ctrl_t"></span> &#176;C</td>
                             </tr>
                         </table>
                     </div>
@@ -195,7 +193,7 @@
                     <svg viewbox="0 0 400 400" style="height:100%">
                         <circle id="sspeedcircle" cx="200" cy="200" r="184"  stroke-width="4" />
                         <circle id="speedcircle" cx="200" cy="200" r="184"  stroke-width="22" />
-                        <text x="200" y="220" text-anchor="middle" alignment-baseline="middle" id="speedometer"><tspan id="v_speed"></tspan></text>
+                        <text x="200" y="250" text-anchor="middle" alignment-baseline="middle" id="speedometer"><tspan id="v_speed"></tspan></text>
                         <text x="200" y="90" text-anchor="middle" alignment-baseline="middle" id="speedunit">km/h</text>
                         <text x="170" y="360" text-anchor="left" alignment-baseline="bottom" id="drivemode"><tspan id="v_gear"></tspan></text>
                       </svg>
@@ -214,10 +212,10 @@
                     <div id="batkmpanel">
                         <table class="datatab">
                             <tr>
-                                <td class="ico"><svg height="20.117928" width="17.793407" ><use href="#icon-bat0" /></svg></td><td class="val"><span id="v_bat0_soc"></span> % - <span id="v_bat0_v"></span> V</td>
+                                <td class="ico"><span id="bat0tico_v"></span></td><td class="val"><span id="v_bat0_soc"></span> % - <span id="v_bat0_v"></span> V</td>
                             </tr>
                             <tr>
-                                <td class="ico"><svg height="20.005831" width="17.793407"><use href="#icon-bat1" /></svg></td><td class="val"><span id="v_bat1_soc"></span> % - <span id="v_bat1_v"></span> V</td>
+                                <td class="ico"><span id="bat1tico_v"></span></td><td class="val"><span id="v_bat1_soc"></span> % - <span id="v_bat1_v"></span> V</td>
                             </tr>
                             <tr>
                                 <td class="ico"><div>TRP</div></td><td class="val"><span id="v_trip"></span> km</td>
@@ -233,18 +231,18 @@
             </div>
             <div id="statusbar">
                 <div id="leftIcons">
-                    <svg id="leftIndicator"  width="25" height="25" ><use href="#icon-indicator"/></svg>
-                    <svg id=""  width="25" height="25" ><use href="#icon-highbeam"/></svg>
-                    <svg id=""  width="25" height="25" ><use href="#icon-charger"/></svg>
+                    <span id="leftIndicator"></span>
+                    <span id="warn_highbeam"></span>
+                    <span id="warn_charger"></span>
                 </div>
                 <div id="clock">
                     12:00pm
                 </div>
                 <div id="rightIcons">
-                    <svg id="warn_bt" width="25" height="25"><use href="#icon-bt"/></svg>
-                    <svg id="" width="25" height="25"><use href="#icon-temp"/></svg>
-                    <svg id="warn_engine" width="25" height="25"><use href="#icon-engine"/></svg>
-                    <svg id="rightIndicator"  width="25" height="25" ><use href="#icon-indicator"/></svg>
+                    <span id="warn_bt"> </span>
+                    <span id="warn_temp"></span>
+                    <span id="warn_engine"> </span>
+                    <span id="rightIndicator"></span>
                 </div>
             </div>
         </div>
