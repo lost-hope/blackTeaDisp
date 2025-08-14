@@ -11,6 +11,7 @@
 #define BT_DALY_CMD_SOC  0x90
 #define BT_DALY_CMD_VRANGE 0x91
 #define BT_DALY_CMD_TRANGE 0x92
+#define BT_DALY_CMD_ERRORS 0x98
 #define BT_DALY_CMD_PARAMS 0x50
 
 #define IGNORE_LIST_SIZE 20
@@ -84,6 +85,8 @@ struct BmsData{
     uint8_t highest_v_cell;
     uint16_t lowest_v_mv;
     uint8_t lowest_v_cell;
+
+    uint8_t errors[8];
 };
 
 struct BtCommand{
@@ -106,10 +109,11 @@ struct DalyBmsDevice{
     // unsigned long last_fast_refresh_ms=0;
     NimBLEAddress address;
 
-    BtCommand cmds[4]={
+    BtCommand cmds[5]={
         {.cmd={0xa5,0x80,BT_DALY_CMD_SOC,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbd},.last_sent=0,.refresh_ms=200},
         {.cmd={0xa5,0x80,BT_DALY_CMD_VRANGE,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbe},.last_sent=0,.refresh_ms=200},
         {.cmd={0xa5,0x80,BT_DALY_CMD_TRANGE,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xbf},.last_sent=0,.refresh_ms=2*1000},
+        {.cmd={0xa5,0x80,BT_DALY_CMD_ERRORS,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xc5},.last_sent=0,.refresh_ms=5*1000},
         {.cmd={0xa5,0x80,BT_DALY_CMD_PARAMS,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x7d},.last_sent=0,.refresh_ms=60*1000}
     };
     bool ready_flag=true;
@@ -446,33 +450,40 @@ void notifycb_bms_daly(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_
         Serial.printf("unknown notification source\n");
         return;
     }
-    
+    //data starts at bytes 4/5
+
     if(pData[2]==BT_DALY_CMD_SOC){
         set_single<uint16_t>(&bd->soc_perm,(uint16_t)((pData[10] &0xFF)<<8 | pData[11]),"/batteries/"+String(bms_i)+"/soc_perm");
         set_single<int64_t>(&bd->current_ma,((int64_t)((pData[8] &0xFF)<<8 | pData[9])-30000)*100,"/batteries/"+String(bms_i)+"/current_ma");
         set_single<uint32_t>(&bd->volt_tot_mv,(uint32_t)((pData[4] &0xFF)<<8 | pData[5])*100,"/batteries/"+String(bms_i)+"/volt_tot_mv");
         //Serial.printf("SoC: %.1f %%, V_tot: %.1f V, current: %.1f A\n",bd->soc_perm/10.0,bd->volt_tot_mv/1000.0,bd->current_ma/1000.0);
     }else if(pData[2]==BT_DALY_CMD_TRANGE){
-
-        //        set_single<uint32_t>(sto,val,String("/batteries/"+bms_i)+"/volt_tot_mv");
-
         set_single<int16_t>(&bd->highest_temp,pData[4] -40,"/batteries/"+String(bms_i)+"/highest_temp");
         set_single<uint8_t>(&bd->highest_temp_cell,pData[5],"/batteries/"+String(bms_i)+"/highest_temp_cell");
         set_single<int16_t>(&bd->lowest_temp,pData[6] -40,"/batteries/"+String(bms_i)+"/lowest_temp");
         set_single<uint8_t>(&bd->lowest_temp_cell,pData[7],"/batteries/"+String(bms_i)+"/lowest_temp_cell");
-
-
         //Serial.printf("highT(no. %u): %i °C, lowT(no. %u): %i °C\n", bd->highest_temp_cell,bd->highest_temp, bd->lowest_temp_cell,bd->lowest_temp);
     }else if(pData[2]==BT_DALY_CMD_VRANGE){
         set_single<uint16_t>(&bd->highest_v_mv,(uint16_t)((pData[4] &0xFF)<<8 | pData[5]),"/batteries/"+String(bms_i)+"/highest_v_mv");
         set_single<uint8_t>(&bd->highest_v_cell,pData[6],"/batteries/"+String(bms_i)+"/highest_v_cell");
         set_single<uint16_t>(&bd->lowest_v_mv,(uint16_t)((pData[7] &0xFF)<<8 | pData[8]),"/batteries/"+String(bms_i)+"/lowest_v_mv");
         set_single<uint8_t>(&bd->lowest_v_cell,pData[9],"/batteries/"+String(bms_i)+"/lowest_v_cell");
-
         //Serial.printf("highV(no. %u): %i °mV, lowV(no. %u): %i mV\n", bd->highest_v_cell,bd->highest_v_mv, bd->lowest_v_cell,bd->lowest_v_mv);
     }else if(pData[2]==BT_DALY_CMD_PARAMS){
         //example: A501 5008 0000 C350 00000E102F
         set_single<uint32_t>(&bd->capacity_mah,(uint32_t)((pData[4]<<24) | (pData[5] <<16) |(pData[6]<<8) | pData[7]),"/batteries/"+String(bms_i)+"/capacity_mah");
+    }else if(pData[2]==BT_DALY_CMD_PARAMS){
+        bool changed=false;
+        for(int i=0;i<8;i++){
+            if(bd->errors[i] != pData[4+i]) {
+                bd->errors[i]!=pData[4+i];
+                changed=true; 
+            }
+        }
+        if(changed){
+            ws_send_single<uint8_t*>( bd->errors, "/batteries/"+String(bms_i)+"/errors");
+        }
+    
     }else{
         Serial.printf("-> other notification from BMS %u\n",bms_i);
         //debug_notify(pRemoteCharacteristic, pData, length, isNotify);
@@ -666,6 +677,7 @@ void setup_webserver_websocket(){
             alldata_doc["batteries"][i]["lowest_v_cell"]=bd->lowest_v_cell;
 
             alldata_doc["batteries"][i]["capacity_mah"]=bd->capacity_mah;
+            alldata_doc["batteries"][i]["errors"]=bd->errors;
         }
         CtrlData* cd=&fardriver_controller_device.data;
 
